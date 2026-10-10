@@ -34,10 +34,12 @@ A modern, fast, and feature-rich YouTube Audio and Video Downloader built with a
 ## 🚀 Quick Start
 
 ### Option 1: Standalone Portable Executable (Recommended)
-Download the latest `YouTube_Downloader.exe` from the [Releases](https://github.com/darimriyazquraishi/youtube-downloader/releases) page:
-1. Double-click `YouTube_Downloader.exe`.
-2. It automatically starts and opens `http://127.0.0.1:5000` in your default browser.
-3. Paste any YouTube link, choose your format, and click **Start Download**.
+[![Download Executable](https://img.shields.io/badge/Download-YouTube__Downloader.exe%20(v1.0.0)-blue?style=for-the-badge&logo=windows)](https://github.com/darimriyazquraishi/youtube-downloader/releases/download/v1.0.0/YouTube_Downloader.exe)
+
+Direct Download: **[YouTube_Downloader.exe (85 MB)](https://github.com/darimriyazquraishi/youtube-downloader/releases/download/v1.0.0/YouTube_Downloader.exe)** or visit the [Releases](https://github.com/darimriyazquraishi/youtube-downloader/releases) page.
+1. Download and double-click `YouTube_Downloader.exe` (no installation, Python, or FFmpeg needed).
+2. It immediately launches and opens `http://127.0.0.1:5000` in your default browser.
+3. Paste any YouTube link, choose your format from the dropdown, and click **▶ Start Download**.
 
 ### Option 2: Running from Source
 
