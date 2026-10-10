@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YouTube Downloader</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Clean Top Bar -->
+  <header class="titlebar">
+    <div class="titlebar-left">
+      <div class="app-logo">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="#ff0000">
+          <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+        </svg>
+      </div>
+      <span class="app-title">YouTube Downloader</span>
+    </div>
+    <div class="titlebar-center">
+      <span>Audio &amp; Video Downloader</span>
+    </div>
+    <div class="titlebar-right">
+      <div class="window-controls">
+        <button class="win-btn" title="Minimize">&minus;</button>
+        <button class="win-btn" title="Maximize">&#9633;</button>
+        <button class="win-btn win-close" title="Close">&times;</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Workspace: Explorer on Left, Middle Editor in Center -->
+  <div class="workbench">
+    
+    <!-- 1. EXPLORER (Left Sidebar) -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <span class="sidebar-title">EXPLORER</span>
+      </div>
+
+      <div class="sidebar-content">
+        <!-- Folders Section -->
+        <div class="section-tree">
+          <div class="tree-header" onclick="toggleSection('tree-folders')">
+            <span class="chevron" id="chev-folders">&#9660;</span>
+            <span class="tree-label">DOWNLOAD FOLDERS</span>
+          </div>
+          <div class="tree-items" id="tree-folders">
+            <div class="tree-item active" id="item-songs" onclick="setDest('e:\\deleteme\\songs')">
+              <span class="file-icon">&#128193;</span>
+              <span class="file-name">songs</span>
+              <span class="badge" id="badge-songs-count">54</span>
+            </div>
+            <div class="tree-item" id="item-videos" onclick="setDest('e:\\deleteme\\videos')">
+              <span class="file-icon">&#128193;</span>
+              <span class="file-name">videos</span>
+            </div>
+            <div class="tree-item" id="item-root" onclick="setDest('e:\\deleteme')">
+              <span class="file-icon">&#128193;</span>
+              <span class="file-name">deleteme (Root)</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- System Storage Section -->
+        <div class="section-tree">
+          <div class="tree-header" onclick="toggleSection('tree-sys')">
+            <span class="chevron" id="chev-sys">&#9660;</span>
+            <span class="tree-label">SYSTEM & STORAGE</span>
+          </div>
+          <div class="tree-items" id="tree-sys">
+            <div class="info-row">
+              <span class="info-key">Free Space:</span>
+              <span class="info-val" id="side-free-gb">178.3 GB</span>
+            </div>
+            <div class="info-row">
+              <span class="info-key">Drive:</span>
+              <span class="info-val">Drive E:</span>
+            </div>
+            <div class="info-row">
+              <span class="info-key">Encoder:</span>
+              <span class="info-val text-green" id="side-ffmpeg">FFmpeg 7.1 Ready</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- 2. MIDDLE SECTION (Center) & 3. TERMINAL (Bottom) -->
+    <main class="editor-area">
+      
+      <!-- Top Tabs Bar -->
+      <div class="tabs-bar">
+        <div class="tab active">
+          <span class="tab-icon">&#128190;</span>
+          <span class="tab-title">Downloader</span>
+          <span class="tab-close">&times;</span>
+        </div>
+      </div>
+
+      <!-- Breadcrumbs -->
+      <div class="breadcrumbs">
+        <span>YouTube Downloader</span>
+        <span class="bc-sep">&rsaquo;</span>
+        <span class="bc-func">Quick Download</span>
+      </div>
+
+      <!-- 2. MIDDLE SECTION: Clean, Direct Downloader -->
+      <div class="editor-content">
+        <div class="downloader-card">
+
+          <!-- 1. YouTube URL Input -->
+          <div class="form-group">
+            <label class="form-label" for="yt-url">YouTube Link (Video or Playlist)</label>
+            <div class="url-row">
+              <input 
+                type="text" 
+                id="yt-url" 
+                placeholder="Paste YouTube link here (video or playlist)..." 
+                autocomplete="off" 
+                spellcheck="false"
+              >
+              <button class="btn btn-secondary" id="btn-analyze" title="Inspect link and calculate size">
+                Analyze
+              </button>
+            </div>
+          </div>
+
+          <!-- 2. Single Selection Option (Select right after pasting link) -->
+          <div class="form-group">
+            <label class="form-label" for="sel-download-type">Download Option</label>
+            <select id="sel-download-type" class="form-select">
+              <optgroup label="Audio Formats">
+                <option value="mp3_speaker" selected>📻 MP3 &mdash; Old Speaker / USB Mode (128k CBR, 44.1kHz)</option>
+                <option value="mp3_320">🎵 MP3 &mdash; Maximum Quality (320 kbps)</option>
+                <option value="mp3_192">🎵 MP3 &mdash; High Quality (192 kbps)</option>
+                <option value="m4a">🎧 Audio &mdash; Original Stream (AAC / M4A)</option>
+              </optgroup>
+              <optgroup label="Video Formats (MP4)">
+                <option value="video_1080">🎬 Video &mdash; 1080p Full HD (MP4)</option>
+                <option value="video_720">🎬 Video &mdash; 720p HD (MP4)</option>
+                <option value="video_best">🎬 Video &mdash; Best Available (MP4)</option>
+                <option value="video_480">🎬 Video &mdash; 480p (MP4)</option>
+              </optgroup>
+            </select>
+            <span class="helper-text">Select whether you want audio (MP3/M4A) or video (MP4) for this link.</span>
+          </div>
+
+          <!-- Analysis Info Bar (Shown when link is inspected/pasted) -->
+          <div class="analysis-bar hidden" id="analysis-bar">
+            <div class="an-meta">
+              <span class="an-dot"></span>
+              <strong id="an-title">Playlist Title</strong>
+              <span class="an-pill" id="an-tracks">0 Items</span>
+              <span class="an-pill" id="an-time">0h 0m</span>
+            </div>
+            <div class="an-est">
+              <span>Estimated Size: <strong class="text-cyan" id="an-size">~0 MB</strong></span>
+            </div>
+          </div>
+
+          <!-- 3. Additional Settings -->
+          <div class="options-grid">
+            
+            <div class="form-group">
+              <label class="form-label" for="input-dest">Destination Folder</label>
+              <input type="text" id="input-dest" class="form-input" value="e:\deleteme\songs">
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="input-max-tracks">Limit Tracks (Optional)</label>
+              <input type="number" id="input-max-tracks" class="form-input" placeholder="All tracks" min="0">
+            </div>
+
+            <!-- Ignore Duplicates Checkbox -->
+            <div class="form-group full-row">
+              <label class="checkbox-label">
+                <input type="checkbox" id="chk-ignore-dups" checked>
+                <span class="custom-check"></span>
+                <span>Ignore duplicate downloads (automatically skips files already in the folder)</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- 4. Action Buttons -->
+          <div class="action-row">
+            <button class="btn btn-primary btn-large" id="btn-download">
+              &#9654; Start Download
+            </button>
+            <button class="btn btn-danger btn-large hidden" id="btn-stop">
+              &#9632; Stop Download
+            </button>
+            <button class="btn btn-outline" id="btn-clear-logs" title="Clear terminal logs">
+              Clear Logs
+            </button>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- 3. TERMINAL (Bottom Panel) -->
+      <section class="terminal-panel" id="terminal-panel">
+        <div class="panel-header">
+          <div class="panel-tabs">
+            <span class="panel-tab active">TERMINAL</span>
+            <span class="panel-tab">OUTPUT</span>
+          </div>
+          <div class="panel-actions">
+            <span class="panel-action" id="action-toggle-term" title="Toggle Size">&#8645;</span>
+            <span class="panel-action" id="action-clear-term" title="Clear Terminal">&#128465;</span>
+          </div>
+        </div>
+
+        <!-- Live Progress Status Bar -->
+        <div class="live-progress" id="live-progress">
+          <div class="progress-info">
+            <span class="progress-status" id="status-text">Ready to download</span>
+            <div class="progress-meta">
+              <span id="stat-speed"></span>
+              <span id="stat-eta"></span>
+              <span class="progress-pct" id="stat-percent">0%</span>
+            </div>
+          </div>
+          <div class="progress-bar-track">
+            <div class="progress-bar-fill" id="progress-fill" style="width: 0%;"></div>
+          </div>
+        </div>
+
+        <!-- Terminal Output Log Screen -->
+        <div class="terminal-screen" id="terminal-screen">
+          <div class="term-line term-system">[SYSTEM] YouTube Downloader initialized.</div>
+          <div class="term-line term-info">[SYSTEM] Paste a link above, choose your download option, and click Start Download.</div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- Status Bar (Bottommost) -->
+  <footer class="statusbar">
+    <div class="sb-left">
+      <span class="sb-item bg-accent">&#9654; Ready</span>
+      <span class="sb-item" id="sb-status-msg">Idle</span>
+    </div>
+    <div class="sb-right">
+      <span class="sb-item" id="sb-format-badge">&#128251; MP3 (Old Speaker Mode)</span>
+      <span class="sb-item" id="sb-free-space">Free: 178.3 GB</span>
+      <span class="sb-item" id="sb-ffmpeg">FFmpeg: Ready</span>
+      <span class="sb-item">UTF-8</span>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

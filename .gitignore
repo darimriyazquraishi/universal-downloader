@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+*.egg-info/
+venv/
+.env
+
+# Build Artifacts
+build/
+dist/
+*.spec
+ffmpeg.exe
+*.exe
+
+# Downloaded Media
+songs/
+videos/
+downloads/
+*.mp3
+*.mp4
+*.m4a
+*.webm
+
+# OS & Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
