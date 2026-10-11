@@ -7,6 +7,7 @@ import shutil
 import threading
 import unicodedata
 import queue
+import urllib.parse
 import yt_dlp
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
@@ -99,6 +100,57 @@ def detect_platform(url):
         return "Twitch"
     return "Universal Web"
 
+def parse_url_structure(url):
+    """Detect if a URL contains a single video, a playlist, or a video within a YouTube Mix/Radio."""
+    u = urllib.parse.urlparse(url)
+    qs = urllib.parse.parse_qs(u.query)
+    is_yt = 'youtube.com' in u.netloc or 'youtu.be' in u.netloc
+    
+    vid = None
+    if is_yt:
+        if 'youtu.be' in u.netloc:
+            vid = u.path.strip('/')
+        else:
+            vid = qs.get('v', [None])[0]
+            
+    plist = qs.get('list', [None])[0]
+    is_mix = bool(plist and plist.startswith(('RD', 'UL', 'TL', 'PU', 'LL')))
+    has_both = bool(vid and plist)
+    clean_vid_url = f"https://www.youtube.com/watch?v={vid}" if vid else None
+    
+    return {
+        "is_youtube": is_yt,
+        "video_id": vid,
+        "playlist_id": plist,
+        "is_mix": is_mix,
+        "has_both": has_both,
+        "clean_video_url": clean_vid_url
+    }
+
+def clean_url(url, remove_playlist=False):
+    """Clean URL by removing tracking params, timestamps, and optionally playlist/mix IDs."""
+    try:
+        u = urllib.parse.urlparse(url)
+        qs = urllib.parse.parse_qs(u.query)
+        
+        # Strip tracking & session params
+        for param in ['si', 'pp', 'feature', 't', 'fbclid', 'igshid', 'utm_source', 'utm_medium', 'utm_campaign']:
+            qs.pop(param, None)
+            
+        is_yt = 'youtube.com' in u.netloc or 'youtu.be' in u.netloc
+        if is_yt:
+            vid = qs.get('v', [None])[0]
+            plist = qs.get('list', [None])[0]
+            is_mix = bool(plist and plist.startswith(('RD', 'UL', 'TL', 'PU', 'LL')))
+            
+            if vid and (remove_playlist or is_mix):
+                return f"https://www.youtube.com/watch?v={vid}"
+                
+        new_query = urllib.parse.urlencode(qs, doseq=True)
+        return urllib.parse.urlunparse((u.scheme, u.netloc, u.path, u.params, new_query, u.fragment))
+    except Exception:
+        return url
+
 # Primary Font Configuration
 FONT_FAMILY = "Sebino Soft Regular"
 
@@ -151,6 +203,8 @@ class UniversalDownloaderApp(ctk.CTk):
         self.analysis_thread = None
         self.log_queue = queue.Queue()
         self.current_analysis = None
+        self.single_cache = None
+        self.playlist_cache = None
         self.is_downloading = False
         self.current_mode = "video" # Default to video for multi-platform clips
 
@@ -379,21 +433,37 @@ class UniversalDownloaderApp(ctk.CTk):
         self.entry_url.bind("<Return>", lambda _event: self.trigger_analyze())
 
         ctk.CTkButton(
-            url_row, text="PASTE", width=68, height=40, corner_radius=4,
+            url_row, text="PASTE", width=62, height=40, corner_radius=4,
             font=ctk.CTkFont(family=FONT_FAMILY, size=11, weight="bold"),
             fg_color=self.tokens["gold_subtle"], hover_color=self.tokens["gold_dark"],
             border_width=1, border_color=self.tokens["gold_border"],
             text_color=self.tokens["gold_bright"], command=self.paste_from_clipboard
         ).pack(side="left", padx=(0, 6))
 
+        ctk.CTkButton(
+            url_row, text="CLEAN", width=62, height=40, corner_radius=4,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11, weight="bold"),
+            fg_color=self.tokens["gold_subtle"], hover_color=self.tokens["gold_dark"],
+            border_width=1, border_color=self.tokens["gold_border"],
+            text_color=self.tokens["gold_bright"], command=self.clean_url_input
+        ).pack(side="left", padx=(0, 6))
+
         self.btn_analyze = ctk.CTkButton(
-            url_row, text="INSPECT", width=90, height=40, corner_radius=4,
+            url_row, text="INSPECT", width=86, height=40, corner_radius=4,
             font=ctk.CTkFont(family=FONT_FAMILY, size=11, weight="bold"),
             fg_color=self.tokens["gold_subtle"], hover_color=self.tokens["gold_dark"],
             border_width=1, border_color=self.tokens["gold_border_bright"],
             text_color=self.tokens["gold_bright"], command=self.trigger_analyze
         )
-        self.btn_analyze.pack(side="left")
+        self.btn_analyze.pack(side="left", padx=(0, 6))
+
+        ctk.CTkButton(
+            url_row, text="CLEAR", width=58, height=40, corner_radius=4,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11, weight="bold"),
+            fg_color=self.tokens["gold_subtle"], hover_color=self.tokens["gold_dark"],
+            border_width=1, border_color=self.tokens["gold_border"],
+            text_color=self.tokens["gold_bright"], command=self.clear_url_input
+        ).pack(side="left")
 
         # Media Inspection Card (Revealed upon inspection)
         self.frame_analysis = ctk.CTkFrame(
@@ -418,6 +488,26 @@ class UniversalDownloaderApp(ctk.CTk):
             text_color=self.tokens["text_primary"], anchor="w", justify="left", wraplength=780
         )
         self.lbl_an_title.pack(fill="x", pady=(2, 0))
+
+        # Scope Selector (Visible when link has both a single video AND a playlist/mix)
+        self.scope_row = ctk.CTkFrame(self.frame_analysis, fg_color="transparent")
+        
+        self.btn_scope_single = ctk.CTkButton(
+            self.scope_row, text="THIS VIDEO ONLY", width=140, height=28, corner_radius=4,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=10, weight="bold"),
+            fg_color=self.tokens["gold"], hover_color=self.tokens["gold_hover"],
+            text_color=self.tokens["gold_text_dark"], command=lambda: self.switch_scope("single")
+        )
+        self.btn_scope_single.pack(side="left", padx=(0, 8))
+
+        self.btn_scope_playlist = ctk.CTkButton(
+            self.scope_row, text="FULL PLAYLIST", width=140, height=28, corner_radius=4,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=10, weight="bold"),
+            fg_color=self.tokens["surface_elevated"], hover_color=self.tokens["surface_hover"],
+            border_width=1, border_color=self.tokens["border"],
+            text_color=self.tokens["text_secondary"], command=lambda: self.switch_scope("playlist")
+        )
+        self.btn_scope_playlist.pack(side="left")
 
         # Inspection Metric Chips Container (Gold accented)
         self.chips_row = ctk.CTkFrame(self.frame_analysis, fg_color="transparent")
@@ -830,6 +920,74 @@ class UniversalDownloaderApp(ctk.CTk):
         except Exception:
             pass
 
+    def clean_url_input(self):
+        url = self.entry_url.get().strip()
+        if url:
+            cleaned = clean_url(url, remove_playlist=True)
+            self.entry_url.delete(0, "end")
+            self.entry_url.insert(0, cleaned)
+            self.append_log("[SYS] URL sanitized: stripped tracking parameters & mix radio playlist.")
+            self.trigger_analyze()
+
+    def clear_url_input(self):
+        self.entry_url.delete(0, "end")
+        self.current_analysis = None
+        self.single_cache = None
+        self.playlist_cache = None
+        self.frame_analysis.pack_forget()
+        self.append_log("[SYS] URL input and inspection card cleared.")
+
+    def switch_scope(self, scope):
+        if not self.current_analysis or not self.current_analysis.get("has_both"):
+            return
+        url = self.current_analysis.get("original_url") or self.entry_url.get().strip()
+        if scope == "single":
+            self.current_analysis["active_scope"] = "single"
+            self.btn_scope_single.configure(
+                fg_color=self.tokens["gold"],
+                hover_color=self.tokens["gold_hover"],
+                text_color=self.tokens["gold_text_dark"]
+            )
+            self.btn_scope_playlist.configure(
+                fg_color=self.tokens["surface_elevated"],
+                hover_color=self.tokens["surface_hover"],
+                text_color=self.tokens["text_secondary"]
+            )
+            if self.single_cache:
+                self.current_analysis = self.single_cache
+                self.update_analysis_meta(self.single_cache)
+        else:
+            self.current_analysis["active_scope"] = "playlist"
+            self.btn_scope_single.configure(
+                fg_color=self.tokens["surface_elevated"],
+                hover_color=self.tokens["surface_hover"],
+                text_color=self.tokens["text_secondary"]
+            )
+            self.btn_scope_playlist.configure(
+                fg_color=self.tokens["gold"],
+                hover_color=self.tokens["gold_hover"],
+                text_color=self.tokens["gold_text_dark"]
+            )
+            if self.playlist_cache:
+                self.current_analysis = self.playlist_cache
+                self.update_analysis_meta(self.playlist_cache)
+            else:
+                self.lbl_an_title.configure(text="Fetching full playlist metadata...")
+                def worker():
+                    try:
+                        res = self.fetch_analysis(url, scope="playlist")
+                        self.playlist_cache = res
+                        self.after(0, lambda: self.on_playlist_loaded(res))
+                    except Exception as e:
+                        self.after(0, lambda: self.append_log(f"[ERR] Failed to load playlist: {e}"))
+                threading.Thread(target=worker, daemon=True).start()
+
+    def on_playlist_loaded(self, res):
+        if self.current_analysis and self.current_analysis.get("active_scope") == "playlist":
+            self.current_analysis = res
+            self.update_analysis_meta(res)
+            self.append_log(f"[OK] Full playlist loaded: '{res['title']}' ({res['track_count']} item(s), {res['duration_str']})")
+
     def on_format_changed(self, choice):
         selected_code = self.all_formats.get(choice, "video_best")
 
@@ -892,7 +1050,7 @@ class UniversalDownloaderApp(ctk.CTk):
 
         def worker():
             try:
-                res = self.fetch_analysis(url)
+                res = self.fetch_analysis(url, scope="single")
                 self.after(0, lambda: self.on_analysis_success(res))
             except Exception as e:
                 self.after(0, lambda: self.on_analysis_error(str(e)))
@@ -900,17 +1058,32 @@ class UniversalDownloaderApp(ctk.CTk):
         self.analysis_thread = threading.Thread(target=worker, daemon=True)
         self.analysis_thread.start()
 
-    def fetch_analysis(self, url):
+    def fetch_analysis(self, url, scope=None):
         platform = detect_platform(url)
+        parsed = parse_url_structure(url)
+
+        target_url = url
+        active_scope = "single"
+        if parsed["has_both"]:
+            if scope == "playlist":
+                active_scope = "playlist"
+                target_url = url
+            else:
+                active_scope = "single"
+                target_url = parsed["clean_video_url"]
+        elif scope == "single" and parsed["clean_video_url"]:
+            active_scope = "single"
+            target_url = parsed["clean_video_url"]
+
         ydl_opts = {
             'quiet': True,
-            'extract_flat': True,
+            'extract_flat': (active_scope == "playlist"),
             'http_headers': {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
             }
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
+            info = ydl.extract_info(target_url, download=False)
             is_playlist = 'entries' in info and bool(info.get('entries'))
             entries = [e for e in info.get('entries', []) if e] if is_playlist else [info]
 
@@ -926,7 +1099,7 @@ class UniversalDownloaderApp(ctk.CTk):
                     if ('youtube' in url.lower() or 'youtu.be' in url.lower()) and e.get('id'):
                         item_url = f"https://www.youtube.com/watch?v={e['id']}"
                     else:
-                        item_url = url
+                        item_url = target_url
                 valid.append({
                     'id': e.get('id') or str(len(valid) + 1),
                     'title': t,
@@ -952,6 +1125,12 @@ class UniversalDownloaderApp(ctk.CTk):
                 "title": media_title,
                 "platform": platform,
                 "is_playlist": is_playlist,
+                "has_both": parsed["has_both"],
+                "is_mix": parsed["is_mix"],
+                "active_scope": active_scope,
+                "clean_video_url": parsed["clean_video_url"],
+                "playlist_id": parsed["playlist_id"],
+                "original_url": url,
                 "track_count": len(valid),
                 "duration_str": dur_str,
                 "total_duration": total_dur,
@@ -960,10 +1139,27 @@ class UniversalDownloaderApp(ctk.CTk):
 
     def on_analysis_success(self, res):
         self.current_analysis = res
+        self.single_cache = res
         self.btn_analyze.configure(state="normal", text="INSPECT")
         self.frame_analysis.pack(fill="x", pady=(0, 10))
+
+        # Setup Scope Buttons
+        if res.get("has_both"):
+            self.scope_row.pack(fill="x", padx=12, pady=(0, 8))
+            self.btn_scope_single.configure(
+                fg_color=self.tokens["gold"],
+                text_color=self.tokens["gold_text_dark"]
+            )
+            self.btn_scope_playlist.configure(
+                fg_color=self.tokens["surface_elevated"],
+                text_color=self.tokens["text_secondary"]
+            )
+        else:
+            self.scope_row.pack_forget()
+
         self.update_analysis_meta(res)
-        self.append_log(f"[OK] {res['platform']} link verified: '{res['title']}' ({res['track_count']} item(s), {res['duration_str']})")
+        tag_extra = " (YouTube Mix Auto-Protected: Single Video)" if res.get("is_mix") else ""
+        self.append_log(f"[OK] {res['platform']} link verified{tag_extra}: '{res['title']}' ({res['track_count']} item(s), {res['duration_str']})")
 
     def update_analysis_meta(self, res):
         chosen_format = self.all_formats.get(self.combo_format.get(), "video_best")
@@ -1075,6 +1271,16 @@ class UniversalDownloaderApp(ctk.CTk):
         self.append_log(f"[QUEUE] Target directory: {dest_dir}")
         self.append_log(f"[QUEUE] Format profile: {download_type}")
 
+        # Smart target URL resolution: Single video vs Playlist
+        parsed = parse_url_structure(url)
+        target_download_url = url
+        if hasattr(self, 'current_analysis') and self.current_analysis and self.current_analysis.get("has_both"):
+            if self.current_analysis.get("active_scope") == "single":
+                target_download_url = self.current_analysis.get("clean_video_url") or url
+        elif parsed.get("is_mix") and parsed.get("clean_video_url"):
+            # Auto-guard against dynamic radio mixes when user didn't explicitly inspect & switch to playlist
+            target_download_url = parsed["clean_video_url"]
+
         # Extract info
         ydl_opts = {
             'quiet': True,
@@ -1085,7 +1291,7 @@ class UniversalDownloaderApp(ctk.CTk):
         }
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
+                info = ydl.extract_info(target_download_url, download=False)
         except Exception as e:
             self.append_log(f"[ERR] Failed to extract URL info: {e}")
             self.after(0, self.finish_download)
@@ -1125,7 +1331,7 @@ class UniversalDownloaderApp(ctk.CTk):
                 if ('youtube' in url.lower() or 'youtu.be' in url.lower()) and e.get('id'):
                     item_url = f"https://www.youtube.com/watch?v={e['id']}"
                 else:
-                    item_url = url
+                    item_url = target_download_url
 
             k = get_core_title_key(t)
             if ignore_dups:

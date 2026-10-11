@@ -142,7 +142,7 @@ class GoldButton(ButtonBehavior, BoxLayout):
         self.text = text
         self.is_outline = is_outline
         self.orientation = "horizontal"
-        self.padding = [12, 6]
+        self.padding = [10, 4]
 
         self.normal_bg = [0, 0, 0, 0] if is_outline else COLOR_GOLD
         self.pressed_bg = [0.83, 0.69, 0.22, 0.2] if is_outline else COLOR_GOLD_LIGHT
@@ -158,7 +158,7 @@ class GoldButton(ButtonBehavior, BoxLayout):
         self.lbl = Label(
             text=self.text,
             font_name=FONT_FAMILY,
-            font_size="14sp",
+            font_size="13.5sp",
             bold=True,
             color=COLOR_GOLD if is_outline else [0.08, 0.08, 0.09, 1.0],
             halign="center",
@@ -177,6 +177,14 @@ class GoldButton(ButtonBehavior, BoxLayout):
 
     def on_release(self):
         self.canvas_bg.rgba = self.normal_bg
+
+    def set_outline(self, is_outline):
+        self.is_outline = is_outline
+        self.normal_bg = [0, 0, 0, 0] if is_outline else COLOR_GOLD
+        self.border_col = COLOR_GOLD if is_outline else [0, 0, 0, 0]
+        self.canvas_bg.rgba = self.normal_bg
+        self.canvas_border.rgba = self.border_col
+        self.lbl.color = COLOR_GOLD if is_outline else [0.08, 0.08, 0.09, 1.0]
 
     def set_text(self, text):
         self.text = text
@@ -227,6 +235,8 @@ class HomeScreen(Screen):
         super().__init__(**kwargs)
         self.app_ref = app_ref
         self.active_analysis = None
+        self.single_cache = None
+        self.playlist_cache = None
         self.selected_format = "video_best"
         self.is_downloading = False
         self.stop_event = threading.Event()
@@ -262,7 +272,7 @@ class HomeScreen(Screen):
         content.bind(minimum_height=content.setter('height'))
 
         # Input Card
-        card_input = CardBox(orientation="vertical", padding=12, spacing=10, size_hint_y=None, height=140)
+        card_input = CardBox(orientation="vertical", padding=12, spacing=10, size_hint_y=None, height=145)
         lbl_in_title = Label(
             text="MEDIA LINK",
             font_name=FONT_FAMILY,
@@ -291,19 +301,30 @@ class HomeScreen(Screen):
         self.input_url.bind(text=self.on_url_text_change)
         card_input.add_widget(self.input_url)
 
-        # Quick Actions Row
-        actions_row = BoxLayout(orientation="horizontal", spacing=8, size_hint_y=None, height=38)
-        self.btn_paste = GoldButton(text="PASTE", is_outline=True, height_dp=38, size_hint_x=0.45)
+        # Quick Actions Toolbar (PASTE | CLEAN LINK | INSPECT | CLEAR)
+        actions_row = BoxLayout(orientation="horizontal", spacing=6, size_hint_y=None, height=36)
+        self.btn_paste = GoldButton(text="PASTE", is_outline=True, height_dp=36, size_hint_x=0.28)
         self.btn_paste.bind(on_release=self.action_paste)
-        self.btn_inspect = GoldButton(text="INSPECT", is_outline=True, height_dp=38, size_hint_x=0.55)
+        
+        self.btn_clean = GoldButton(text="CLEAN", is_outline=True, height_dp=36, size_hint_x=0.24)
+        self.btn_clean.bind(on_release=self.action_clean_url)
+
+        self.btn_inspect = GoldButton(text="INSPECT", is_outline=False, height_dp=36, size_hint_x=0.30)
         self.btn_inspect.bind(on_release=self.action_inspect)
+
+        self.btn_clear = GoldButton(text="CLEAR", is_outline=True, height_dp=36, size_hint_x=0.18)
+        self.btn_clear.bind(on_release=self.action_clear_input)
+
         actions_row.add_widget(self.btn_paste)
+        actions_row.add_widget(self.btn_clean)
         actions_row.add_widget(self.btn_inspect)
+        actions_row.add_widget(self.btn_clear)
         card_input.add_widget(actions_row)
         content.add_widget(card_input)
 
         # Inspection Results Card (Dynamic)
-        self.card_inspect = CardBox(orientation="vertical", padding=12, spacing=8, size_hint_y=None, height=130)
+        self.card_inspect = CardBox(orientation="vertical", padding=12, spacing=8, size_hint_y=None, height=126)
+        
         self.badge_platform = Label(
             text="WAITING FOR LINK",
             font_name="Roboto",
@@ -315,6 +336,8 @@ class HomeScreen(Screen):
             halign="left"
         )
         self.badge_platform.bind(size=self.badge_platform.setter('text_size'))
+        self.card_inspect.add_widget(self.badge_platform)
+
         self.lbl_inspect_title = Label(
             text="No media inspected yet",
             font_name=FONT_FAMILY,
@@ -322,10 +345,22 @@ class HomeScreen(Screen):
             bold=True,
             color=COLOR_TEXT_WHITE,
             size_hint_y=None,
-            height=36,
+            height=34,
             halign="left"
         )
         self.lbl_inspect_title.bind(size=self.lbl_inspect_title.setter('text_size'))
+        self.card_inspect.add_widget(self.lbl_inspect_title)
+
+        # Scope Selector (Visible when link has both a single video AND a playlist/mix)
+        self.row_scope = BoxLayout(orientation="horizontal", spacing=8, size_hint_y=None, height=0, opacity=0.0)
+        self.row_scope.disabled = True
+        self.btn_scope_single = GoldButton(text="THIS VIDEO ONLY", is_outline=False, height_dp=34, size_hint_x=0.5)
+        self.btn_scope_single.bind(on_release=lambda *_: self.switch_scope("single"))
+        self.btn_scope_playlist = GoldButton(text="FULL PLAYLIST", is_outline=True, height_dp=34, size_hint_x=0.5)
+        self.btn_scope_playlist.bind(on_release=lambda *_: self.switch_scope("playlist"))
+        self.row_scope.add_widget(self.btn_scope_single)
+        self.row_scope.add_widget(self.btn_scope_playlist)
+        self.card_inspect.add_widget(self.row_scope)
 
         # Metrics row
         row_chips = BoxLayout(orientation="horizontal", spacing=6, size_hint_y=None, height=28)
@@ -335,9 +370,6 @@ class HomeScreen(Screen):
         row_chips.add_widget(self.chip_items)
         row_chips.add_widget(self.chip_dur)
         row_chips.add_widget(self.chip_size)
-
-        self.card_inspect.add_widget(self.badge_platform)
-        self.card_inspect.add_widget(self.lbl_inspect_title)
         self.card_inspect.add_widget(row_chips)
         content.add_widget(self.card_inspect)
 
@@ -356,7 +388,6 @@ class HomeScreen(Screen):
         lbl_fmt_head.bind(size=lbl_fmt_head.setter('text_size'))
         card_format.add_widget(lbl_fmt_head)
 
-        # Format Chips Grid (Optimized button text to prevent awkward wrapping)
         grid_fmt = GridLayout(cols=3, spacing=6, size_hint_y=None, height=80)
         self.fmt_buttons = {}
         formats = [
@@ -420,13 +451,41 @@ class HomeScreen(Screen):
         self.selected_format = key
         for k, btn in self.fmt_buttons.items():
             is_active = (k == key)
-            btn.is_outline = not is_active
-            btn.normal_bg = COLOR_GOLD if is_active else [0, 0, 0, 0]
-            btn.canvas_bg.rgba = btn.normal_bg
-            btn.lbl.color = [0.08, 0.08, 0.09, 1.0] if is_active else COLOR_GOLD
+            btn.set_outline(not is_active)
 
     def on_url_text_change(self, instance, text):
-        pass
+        t = text.strip()
+        if t.startswith(('http://', 'https://')):
+            parsed = engine.parse_url_structure(t)
+            plat = engine.detect_platform(t)
+            if parsed.get("is_mix"):
+                self.badge_platform.text = f"{plat.upper()} MIX (DEFAULT: SINGLE VIDEO)"
+            elif parsed.get("has_both"):
+                self.badge_platform.text = f"{plat.upper()} (VIDEO + PLAYLIST DETECTED)"
+            else:
+                self.badge_platform.text = f"{plat.upper()} LINK DETECTED"
+
+    def action_clean_url(self, *args):
+        url = self.input_url.text.strip()
+        if url:
+            cleaned = engine.clean_url(url, remove_playlist=True)
+            self.input_url.text = cleaned
+            self.action_inspect()
+
+    def action_clear_input(self, *args):
+        self.input_url.text = ""
+        self.active_analysis = None
+        self.single_cache = None
+        self.playlist_cache = None
+        self.badge_platform.text = "WAITING FOR LINK"
+        self.lbl_inspect_title.text = "No media inspected yet"
+        self.chip_items.text = "-- items"
+        self.chip_dur.text = "-- duration"
+        self.chip_size.text = "-- size"
+        self.row_scope.opacity = 0.0
+        self.row_scope.height = 0
+        self.row_scope.disabled = True
+        self.card_inspect.height = 126
 
     def action_paste(self, *args):
         try:
@@ -447,7 +506,8 @@ class HomeScreen(Screen):
 
         def worker():
             try:
-                res = engine.inspect_url(url)
+                # By default inspects the single video if it's a mix/combo link
+                res = engine.inspect_url(url, scope="single")
                 Clock.schedule_once(lambda dt: self.on_inspect_success(res), 0)
             except Exception as e:
                 Clock.schedule_once(lambda dt: self.on_inspect_error(str(e)), 0)
@@ -456,17 +516,85 @@ class HomeScreen(Screen):
 
     def on_inspect_success(self, res):
         self.active_analysis = res
+        self.single_cache = res
         self.btn_inspect.set_text("INSPECT")
-        self.badge_platform.text = f"VERIFIED {res['platform'].upper()}"
+        
+        # Configure badge
+        badge_txt = f"VERIFIED {res['platform'].upper()}"
+        if res.get("is_mix"):
+            badge_txt = "VERIFIED YOUTUBE (MIX DETECTED)"
+        elif res.get("has_both"):
+            badge_txt = "VERIFIED YOUTUBE (VIDEO + PLAYLIST)"
+        self.badge_platform.text = badge_txt
+
         self.lbl_inspect_title.text = res['title']
         self.chip_items.text = f"{res['track_count']} item(s)"
         self.chip_dur.text = res['duration_str']
         self.chip_size.text = f"~{res['size_estimate']}"
 
+        # Setup Scope Buttons
+        if res.get("has_both"):
+            self.row_scope.opacity = 1.0
+            self.row_scope.height = 34
+            self.row_scope.disabled = False
+            self.card_inspect.height = 168
+            self.btn_scope_single.set_outline(False) # Selected
+            self.btn_scope_playlist.set_outline(True)
+        else:
+            self.row_scope.opacity = 0.0
+            self.row_scope.height = 0
+            self.row_scope.disabled = True
+            self.card_inspect.height = 126
+
     def on_inspect_error(self, err):
         self.btn_inspect.set_text("INSPECT")
         self.badge_platform.text = "INSPECTION FAILED"
         self.lbl_inspect_title.text = err[:80]
+        self.row_scope.opacity = 0.0
+        self.row_scope.height = 0
+        self.row_scope.disabled = True
+        self.card_inspect.height = 126
+
+    def switch_scope(self, scope):
+        if not self.active_analysis or not self.active_analysis.get("has_both"):
+            return
+        url = self.active_analysis.get("original_url") or self.input_url.text.strip()
+        
+        if scope == "single":
+            self.active_analysis["active_scope"] = "single"
+            self.btn_scope_single.set_outline(False)
+            self.btn_scope_playlist.set_outline(True)
+            if self.single_cache:
+                self.lbl_inspect_title.text = self.single_cache["title"]
+                self.chip_items.text = f"{self.single_cache['track_count']} item(s)"
+                self.chip_dur.text = self.single_cache["duration_str"]
+                self.chip_size.text = f"~{self.single_cache['size_estimate']}"
+        else:
+            self.active_analysis["active_scope"] = "playlist"
+            self.btn_scope_single.set_outline(True)
+            self.btn_scope_playlist.set_outline(False)
+            if self.playlist_cache:
+                self.lbl_inspect_title.text = self.playlist_cache["title"]
+                self.chip_items.text = f"{self.playlist_cache['track_count']} item(s)"
+                self.chip_dur.text = self.playlist_cache["duration_str"]
+                self.chip_size.text = f"~{self.playlist_cache['size_estimate']}"
+            else:
+                self.lbl_inspect_title.text = "Fetching full playlist details..."
+                def worker():
+                    try:
+                        p_res = engine.inspect_url(url, scope="playlist")
+                        self.playlist_cache = p_res
+                        Clock.schedule_once(lambda dt: self.on_playlist_loaded(p_res), 0)
+                    except Exception as e:
+                        pass
+                threading.Thread(target=worker, daemon=True).start()
+
+    def on_playlist_loaded(self, res):
+        if self.active_analysis and self.active_analysis.get("active_scope") == "playlist":
+            self.lbl_inspect_title.text = res['title']
+            self.chip_items.text = f"{res['track_count']} item(s)"
+            self.chip_dur.text = res['duration_str']
+            self.chip_size.text = f"~{res['size_estimate']}"
 
     def action_start_download(self, *args):
         url = self.input_url.text.strip()
@@ -478,6 +606,16 @@ class HomeScreen(Screen):
         dest_dir = cfg.get("download_dir", engine.get_default_download_dir())
         os.makedirs(dest_dir, exist_ok=True)
 
+        # Smart target URL resolution: Single video vs Playlist
+        parsed = engine.parse_url_structure(url)
+        target_download_url = url
+        if self.active_analysis and self.active_analysis.get("has_both"):
+            if self.active_analysis.get("active_scope") == "single":
+                target_download_url = self.active_analysis.get("clean_video_url") or url
+        elif parsed.get("is_mix") and parsed.get("clean_video_url"):
+            # Auto-guard against dynamic radio mixes when user didn't explicitly inspect & switch to playlist
+            target_download_url = parsed["clean_video_url"]
+
         self.is_downloading = True
         self.stop_event.clear()
         self.btn_download.set_text("DOWNLOADING...")
@@ -486,7 +624,7 @@ class HomeScreen(Screen):
         self.lbl_progress_status.text = "Preparing media stream..."
 
         def worker():
-            platform = engine.detect_platform(url)
+            platform = engine.detect_platform(target_download_url)
             is_video = self.selected_format.startswith("video_")
             bitrate = "320" if self.selected_format == "mp3_320" else ("192" if self.selected_format == "mp3_192" else "128")
 
@@ -541,7 +679,7 @@ class HomeScreen(Screen):
             try:
                 import yt_dlp
                 with yt_dlp.YoutubeDL(opts) as ydl:
-                    ydl.download([url])
+                    ydl.download([target_download_url])
                 Clock.schedule_once(lambda dt: self.on_download_complete(filename_base, full_path), 0)
             except Exception as e:
                 Clock.schedule_once(lambda dt: self.on_download_failed(filename_base, str(e)), 0)
@@ -860,7 +998,7 @@ class SettingsScreen(Screen):
         lbl_info1.bind(size=lbl_info1.setter('text_size'))
         lbl_info2 = Label(text="Platforms: YouTube, Instagram, TikTok, X, FB, Reddit", font_name=FONT_FAMILY, font_size="11sp", color=COLOR_TEXT_MUTED, size_hint_y=None, height=18, halign="left")
         lbl_info2.bind(size=lbl_info2.setter('text_size'))
-        lbl_info3 = Label(text="Architecture: Android Kivy/KivyMD Native Application", font_name=FONT_FAMILY, font_size="11sp", color=COLOR_TEXT_MUTED, size_hint_y=None, height=18, halign="left")
+        lbl_info3 = Label(text="Smart Mix Filter: Auto-extract single video from YouTube Mixes", font_name=FONT_FAMILY, font_size="11sp", color=COLOR_TEXT_MUTED, size_hint_y=None, height=18, halign="left")
         lbl_info3.bind(size=lbl_info3.setter('text_size'))
         card_info.add_widget(lbl_info_head)
         card_info.add_widget(lbl_info1)

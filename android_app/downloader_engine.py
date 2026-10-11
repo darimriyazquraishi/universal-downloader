@@ -6,6 +6,7 @@ import time
 import shutil
 import threading
 import unicodedata
+import urllib.parse
 import yt_dlp
 
 try:
@@ -49,7 +50,8 @@ def load_settings():
         "download_dir": get_default_download_dir(),
         "ignore_dups": True,
         "max_tracks": 0,
-        "default_format": "video_best"
+        "default_format": "video_best",
+        "auto_clean_mixes": True
     }
     try:
         p = get_config_path()
@@ -69,6 +71,60 @@ def save_settings(cfg):
             json.dump(cfg, f, indent=2)
     except Exception:
         pass
+
+def parse_url_structure(url):
+    """Detect if a URL contains a single video, a playlist, or a video within a YouTube Mix/Radio."""
+    u = urllib.parse.urlparse(url)
+    qs = urllib.parse.parse_qs(u.query)
+    is_yt = 'youtube.com' in u.netloc or 'youtu.be' in u.netloc
+    
+    vid = None
+    if is_yt:
+        if 'youtu.be' in u.netloc:
+            vid = u.path.strip('/')
+        else:
+            vid = qs.get('v', [None])[0]
+            
+    plist = qs.get('list', [None])[0]
+    is_mix = bool(plist and plist.startswith(('RD', 'UL', 'TL', 'PU', 'LL')))
+    has_both = bool(vid and plist)
+    
+    clean_vid_url = f"https://www.youtube.com/watch?v={vid}" if vid else None
+    
+    return {
+        "is_youtube": is_yt,
+        "video_id": vid,
+        "playlist_id": plist,
+        "is_mix": is_mix,
+        "has_both": has_both,
+        "clean_video_url": clean_vid_url
+    }
+
+def clean_url(url, remove_playlist=False):
+    """Clean URL by removing tracking params, timestamps, and optionally playlist/mix IDs."""
+    try:
+        u = urllib.parse.urlparse(url)
+        qs = urllib.parse.parse_qs(u.query)
+        
+        # Strip tracking & session params
+        for param in ['si', 'pp', 'feature', 't', 'fbclid', 'igshid', 'utm_source', 'utm_medium', 'utm_campaign']:
+            qs.pop(param, None)
+            
+        is_yt = 'youtube.com' in u.netloc or 'youtu.be' in u.netloc
+        if is_yt:
+            vid = qs.get('v', [None])[0]
+            plist = qs.get('list', [None])[0]
+            is_mix = bool(plist and plist.startswith(('RD', 'UL', 'TL', 'PU', 'LL')))
+            
+            if vid and (remove_playlist or is_mix):
+                # Return clean single video URL
+                return f"https://www.youtube.com/watch?v={vid}"
+                
+        # Reconstruct clean URL
+        new_query = urllib.parse.urlencode(qs, doseq=True)
+        return urllib.parse.urlunparse((u.scheme, u.netloc, u.path, u.params, new_query, u.fragment))
+    except Exception:
+        return url
 
 def detect_platform(url):
     u = url.lower()
@@ -124,18 +180,41 @@ def get_core_title_key(title):
         candidate = re.sub(r'[^a-zA-Z0-9]', '', (parts[0] + parts[1]).lower())
     return candidate
 
-def inspect_url(url):
-    """Deep inspect media URL for tracks, metadata, and rough size estimate."""
+def inspect_url(url, scope=None):
+    """Deep inspect media URL for tracks, metadata, and rough size estimate.
+    Automatically handles single video vs playlist/mix selection.
+    scope: None (auto-detect), 'single' (force video only), 'playlist' (force entire playlist)
+    """
     platform = detect_platform(url)
+    parsed = parse_url_structure(url)
+    
+    # Auto-resolve scope if user has both video and playlist
+    target_url = url
+    active_scope = "single"
+    
+    if parsed["has_both"]:
+        # If user explicitly wants playlist, use original url
+        if scope == "playlist":
+            active_scope = "playlist"
+            target_url = url
+        else:
+            # Default to single video for YouTube mixes (RDMM etc.) or when single requested
+            active_scope = "single"
+            target_url = parsed["clean_video_url"]
+    elif scope == "single" and parsed["clean_video_url"]:
+        active_scope = "single"
+        target_url = parsed["clean_video_url"]
+
     ydl_opts = {
         'quiet': True,
-        'extract_flat': True,
+        'extract_flat': (active_scope == "playlist"), # Fast list extraction if playlist
         'http_headers': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
         }
     }
+    
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=False)
+        info = ydl.extract_info(target_url, download=False)
         is_playlist = 'entries' in info and bool(info.get('entries'))
         entries = [e for e in info.get('entries', []) if e] if is_playlist else [info]
 
@@ -151,7 +230,7 @@ def inspect_url(url):
                 if ('youtube' in url.lower() or 'youtu.be' in url.lower()) and e.get('id'):
                     item_url = f"https://www.youtube.com/watch?v={e['id']}"
                 else:
-                    item_url = url
+                    item_url = target_url
             valid.append({
                 'id': e.get('id') or str(len(valid) + 1),
                 'title': t,
@@ -181,6 +260,12 @@ def inspect_url(url):
             "title": media_title,
             "platform": platform,
             "is_playlist": is_playlist,
+            "has_both": parsed["has_both"],
+            "is_mix": parsed["is_mix"],
+            "active_scope": active_scope,
+            "clean_video_url": parsed["clean_video_url"],
+            "playlist_id": parsed["playlist_id"],
+            "original_url": url,
             "track_count": len(valid),
             "duration_str": dur_str,
             "total_duration": total_dur,
