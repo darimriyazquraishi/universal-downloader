@@ -27,7 +27,7 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.anchorlayout import AnchorLayout
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.gridlayout import GridLayout
-from kivy.uix.screenmanager import ScreenManager, Screen, SlideTransition
+from kivy.uix.screenmanager import ScreenManager, Screen, SlideTransition, FadeTransition, CardTransition
 from kivy.uix.label import Label
 from kivy.uix.button import Button
 from kivy.uix.textinput import TextInput
@@ -262,17 +262,21 @@ class GoldButton(ButtonBehavior, BoxLayout):
         self.line_border.rounded_rectangle = (self.pos[0], self.pos[1], self.size[0], self.size[1], 10)
 
     def on_press(self):
-        self.canvas_bg.rgba = self.pressed_bg
+        Animation.stop_all(self.canvas_bg)
+        Animation(rgba=self.pressed_bg, duration=0.06).start(self.canvas_bg)
 
     def on_release(self):
-        self.canvas_bg.rgba = self.normal_bg
+        Animation.stop_all(self.canvas_bg)
+        Animation(rgba=self.normal_bg, duration=0.18, t='out_quad').start(self.canvas_bg)
 
     def set_outline(self, is_outline):
         self.is_outline = is_outline
         self.normal_bg = [0, 0, 0, 0] if is_outline else COLOR_GOLD
         self.border_col = COLOR_GOLD if is_outline else [0, 0, 0, 0]
-        self.canvas_bg.rgba = self.normal_bg
-        self.canvas_border.rgba = self.border_col
+        Animation.stop_all(self.canvas_bg)
+        Animation.stop_all(self.canvas_border)
+        Animation(rgba=self.normal_bg, duration=0.15).start(self.canvas_bg)
+        Animation(rgba=self.border_col, duration=0.15).start(self.canvas_border)
         self.lbl.color = COLOR_GOLD if is_outline else [0.08, 0.08, 0.09, 1.0]
 
     def set_text(self, text):
@@ -359,6 +363,11 @@ class NavButton(ButtonBehavior, BoxLayout):
         self._did_long_press = False
 
         self.box_icon = AnchorLayout(size_hint_y=0.6, anchor_x="center", anchor_y="center")
+        with self.box_icon.canvas.before:
+            self.pill_col = Color(0.83, 0.69, 0.22, 0.0)
+            self.pill_rect = RoundedRectangle(pos=self.box_icon.pos, size=(52, 28), radius=[14])
+        self.box_icon.bind(pos=self._update_pill, size=self._update_pill)
+
         self.v_icon = VectorIcon(icon_type=icon_type, is_active=False, size_px=20)
         self.box_icon.add_widget(self.v_icon)
         self.add_widget(self.box_icon)
@@ -374,11 +383,25 @@ class NavButton(ButtonBehavior, BoxLayout):
 
         Window.bind(mouse_pos=self._on_mouse_pos)
 
+    def _update_pill(self, *args):
+        pw, ph = 52, 28
+        self.pill_rect.pos = (self.box_icon.x + (self.box_icon.width - pw) / 2, self.box_icon.y + (self.box_icon.height - ph) / 2)
+        self.pill_rect.size = (pw, ph)
+
     def set_active(self, active):
         self.is_active = active
         self.v_icon.set_active(active)
-        c = COLOR_GOLD if active else COLOR_TEXT_MUTED
-        self.lbl_text.color = c
+        Animation.stop_all(self.pill_col)
+        Animation.stop_all(self.v_icon)
+        if active:
+            Animation(rgba=[0.83, 0.69, 0.22, 0.18], duration=0.22, t='out_quad').start(self.pill_col)
+            self.lbl_text.color = COLOR_GOLD
+            # Subtle bounce micro-animation on icon
+            anim_bounce = Animation(size=(23, 23), duration=0.09, t='out_quad') + Animation(size=(20, 20), duration=0.12, t='in_out_quad')
+            anim_bounce.start(self.v_icon)
+        else:
+            Animation(rgba=[0, 0, 0, 0], duration=0.16).start(self.pill_col)
+            self.lbl_text.color = COLOR_TEXT_MUTED
 
     def on_release(self):
         if self.app_ref:
@@ -701,10 +724,11 @@ class HomeScreen(Screen):
         self.chip_items.text = "-- items"
         self.chip_dur.text = "-- duration"
         self.chip_size.text = "-- size"
-        self.row_scope.opacity = 0.0
-        self.row_scope.height = 0
+        Animation.stop_all(self.card_inspect)
+        Animation.stop_all(self.row_scope)
         self.row_scope.disabled = True
-        self.card_inspect.height = 126
+        Animation(height=126, duration=0.22, t='out_quad').start(self.card_inspect)
+        Animation(height=0, opacity=0.0, duration=0.22, t='out_quad').start(self.row_scope)
 
     def action_paste(self, *args):
         try:
@@ -751,28 +775,31 @@ class HomeScreen(Screen):
         self.chip_dur.text = res['duration_str']
         self.chip_size.text = f"~{res['size_estimate']}"
 
-        # Setup Scope Buttons
+        # Setup Scope Buttons with fluid expansion animation
         if res.get("has_both"):
-            self.row_scope.opacity = 1.0
-            self.row_scope.height = 34
+            Animation.stop_all(self.card_inspect)
+            Animation.stop_all(self.row_scope)
             self.row_scope.disabled = False
-            self.card_inspect.height = 168
+            Animation(height=168, duration=0.28, t='out_cubic').start(self.card_inspect)
+            Animation(height=34, opacity=1.0, duration=0.28, t='out_cubic').start(self.row_scope)
             self.btn_scope_single.set_outline(False) # Selected
             self.btn_scope_playlist.set_outline(True)
         else:
-            self.row_scope.opacity = 0.0
-            self.row_scope.height = 0
+            Animation.stop_all(self.card_inspect)
+            Animation.stop_all(self.row_scope)
             self.row_scope.disabled = True
-            self.card_inspect.height = 126
+            Animation(height=126, duration=0.22, t='out_quad').start(self.card_inspect)
+            Animation(height=0, opacity=0.0, duration=0.22, t='out_quad').start(self.row_scope)
 
     def on_inspect_error(self, err):
         self.btn_inspect.set_text("INSPECT")
         self.badge_platform.text = "INSPECTION FAILED"
         self.lbl_inspect_title.text = err[:80]
-        self.row_scope.opacity = 0.0
-        self.row_scope.height = 0
+        Animation.stop_all(self.card_inspect)
+        Animation.stop_all(self.row_scope)
         self.row_scope.disabled = True
-        self.card_inspect.height = 126
+        Animation(height=126, duration=0.22, t='out_quad').start(self.card_inspect)
+        Animation(height=0, opacity=0.0, duration=0.22, t='out_quad').start(self.row_scope)
 
     def switch_scope(self, scope):
         if not self.active_analysis or not self.active_analysis.get("has_both"):
@@ -906,7 +933,8 @@ class HomeScreen(Screen):
         threading.Thread(target=worker, daemon=True).start()
 
     def update_progress_ui(self, pct, speed, eta):
-        self.bar_progress.value = pct
+        Animation.stop_all(self.bar_progress)
+        Animation(value=pct, duration=0.15, t='out_quad').start(self.bar_progress)
         self.lbl_pct.text = f"{int(pct)}%"
         if speed:
             self.lbl_speed.text = f"SPEED: {speed}"
@@ -1021,7 +1049,9 @@ class ManagerScreen(Screen):
         card.add_widget(row_actions)
 
         self.items_data[name] = {"card": card, "status_lbl": lbl_status, "path": path}
+        card.opacity = 0
         self.list_layout.add_widget(card)
+        Animation(opacity=1.0, duration=0.25, t='out_quad').start(card)
 
     def mark_completed(self, name, full_path):
         if name in self.items_data:
@@ -1225,9 +1255,41 @@ class SettingsScreen(Screen):
         card_info.add_widget(lbl_info3)
         content.add_widget(card_info)
 
+        # Transition Style Card
+        card_trans = CardBox(orientation="vertical", padding=12, spacing=8, size_hint_y=None, height=92)
+        lbl_trans_head = Label(
+            text="SCREEN TRANSITION STYLE",
+            font_name=FONT_FAMILY,
+            font_size="12sp",
+            bold=True,
+            color=COLOR_TEXT_MUTED,
+            size_hint_y=None,
+            height=18,
+            halign="left"
+        )
+        lbl_trans_head.bind(size=lbl_trans_head.setter('text_size'))
+        card_trans.add_widget(lbl_trans_head)
+
+        row_trans = BoxLayout(orientation="horizontal", spacing=6, size_hint_y=None, height=36)
+        cur_style = self.cfg.get("transition_style", "slide")
+        self.btn_t_slide = GoldButton(text="DIRECTIONAL SLIDE", is_outline=(cur_style != "slide"), height_dp=34, size_hint_x=0.5, tooltip="Smooth directional sliding based on tab order.")
+        self.btn_t_fade = GoldButton(text="SILK CROSSFADE", is_outline=(cur_style != "fade"), height_dp=34, size_hint_x=0.5, tooltip="Silky smooth alpha crossfade between screens.")
+        self.btn_t_slide.bind(on_release=lambda *_: self.set_transition_style("slide"))
+        self.btn_t_fade.bind(on_release=lambda *_: self.set_transition_style("fade"))
+        row_trans.add_widget(self.btn_t_slide)
+        row_trans.add_widget(self.btn_t_fade)
+        card_trans.add_widget(row_trans)
+        content.add_widget(card_trans)
+
         scroll.add_widget(content)
         root.add_widget(scroll)
         self.add_widget(root)
+
+    def set_transition_style(self, style):
+        self.cfg["transition_style"] = style
+        engine.save_settings(self.cfg)
+        self.btn_t_slide.set_outline(style != "slide")
+        self.btn_t_fade.set_outline(style != "fade")
 
     def save_folder(self, *args):
         p = self.input_dest.text.strip()
@@ -1327,6 +1389,28 @@ class UniversalDownloaderMobileApp(App):
             self.tooltip_toast.hide()
 
     def switch_screen(self, screen_name):
+        curr_screen = self.sm.current
+        if curr_screen == screen_name:
+            return
+
+        order = {"home": 0, "manager": 1, "settings": 2}
+        curr_idx = order.get(curr_screen, 0)
+        new_idx = order.get(screen_name, 0)
+
+        # Retrieve transition mode from settings
+        cfg_style = "slide"
+        if hasattr(self, 'settings_screen') and hasattr(self.settings_screen, 'cfg'):
+            cfg_style = self.settings_screen.cfg.get("transition_style", "slide")
+
+        if cfg_style == "fade":
+            if not isinstance(self.sm.transition, FadeTransition):
+                self.sm.transition = FadeTransition(duration=0.20)
+        else:
+            # Default: Smooth Direction-Aware Slide (left if going forward, right if going back)
+            if not isinstance(self.sm.transition, SlideTransition):
+                self.sm.transition = SlideTransition(duration=0.25)
+            self.sm.transition.direction = "left" if new_idx > curr_idx else "right"
+
         self.sm.current = screen_name
         self.nav_home.set_active(screen_name == "home")
         self.nav_mgr.set_active(screen_name == "manager")
