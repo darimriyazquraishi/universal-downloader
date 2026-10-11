@@ -37,18 +37,45 @@ python build_exe.py
 
 The script builds `dist/YouTube_Downloader.exe`. It no longer copies the output to a machine-specific folder. The executable includes the desktop UI, yt-dlp, and FFmpeg.
 
+## Android Mobile Edition (`android_app/`)
+
+A dedicated mobile touch interface optimized for Android smartphones, built with **Kivy / KivyMD** adhering to the luxury Gold design system and `Sebino Soft Regular` typography:
+
+- **Bottom Navigation Bar**: Seamlessly switch between **Downloader**, **Download Manager**, and **Settings**.
+- **System Share-Sheet Integration**: When sharing from YouTube, Instagram, TikTok, or X, select *Universal Downloader* to auto-paste and inspect links.
+- **Custom Destination Picker**: Select your preferred destination folder on internal storage or SD card (defaults to `/storage/emulated/0/Download/Media Downloads`).
+- **Live Simulator**: Test and preview the mobile app on Windows using the phone simulator:
+  ```powershell
+  cd android_app
+  run_mobile_simulator.bat
+  ```
+
+### Build Android APK
+
+- **Automated Cloud Build**: Push to GitHub or run the GitHub Actions workflow [`.github/workflows/build_apk.yml`](.github/workflows/build_apk.yml) to compile the APK via Buildozer in the cloud.
+- **Local Linux / WSL Build**:
+  ```bash
+  cd android_app
+  pip install buildozer cython
+  buildozer android debug
+  ```
+  The compiled `.apk` will be in `android_app/bin/`.
+
 ## Project layout
 
 ```text
-gui_app.py       # Main native desktop application and download engine
-build_exe.py     # PyInstaller build script
-requirements.txt # Python dependencies
-run_app.bat      # One-click source launcher
-server.py        # Older local-server prototype; not used by gui_app.py
-static/          # Older browser UI prototype; not used by gui_app.py
+gui_app.py               # Windows desktop application (CustomTkinter)
+build_exe.py             # PyInstaller Windows build script
+android_app/             # Android mobile edition (Kivy)
+  ├── main.py            # Android mobile app entry point
+  ├── downloader_engine.py # Modular background download engine
+  ├── buildozer.spec     # Android APK build configuration
+  ├── run_mobile_simulator.bat # Phone preview simulator
+  └── assets/            # Fonts, intent filters, and icons
+.github/workflows/       # Automated GitHub Actions APK build workflow
+requirements.txt         # Python dependencies
+run_app.bat              # Windows one-click launcher
 ```
-
-The current app entry point is `gui_app.py`. The `server.py` and `static/` files are retained from an earlier browser-based prototype; they are not used when launching the native desktop app.
 
 ## License
 
