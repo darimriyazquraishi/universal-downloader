@@ -33,21 +33,21 @@ else:
     except Exception:
         FFMPEG_EXE = shutil.which("ffmpeg")
 
-# Dynamic download directory and user settings (no hardcoded machine paths)
+# Dynamic download directory and user settings
 def get_default_download_dir():
     """Dynamically determine default download directory based on OS user Downloads folder."""
     user_downloads = os.path.join(os.path.expanduser("~"), "Downloads")
     if os.path.exists(user_downloads):
-        return os.path.normpath(os.path.join(user_downloads, "YouTube Downloads"))
+        return os.path.normpath(os.path.join(user_downloads, "Media Downloads"))
     return os.path.normpath(os.path.join(EXE_DIR, "downloads"))
 
 def get_config_file():
-    """Path to the user configuration file stored in %APPDATA% or ~/.youtube_downloader."""
+    """Path to the user configuration file stored in %APPDATA% or ~/.universal_downloader."""
     appdata = os.getenv("APPDATA")
     if appdata and os.path.exists(appdata):
-        cfg_dir = os.path.join(appdata, "YouTubeDownloader")
+        cfg_dir = os.path.join(appdata, "UniversalDownloader")
     else:
-        cfg_dir = os.path.join(os.path.expanduser("~"), ".youtube_downloader")
+        cfg_dir = os.path.join(os.path.expanduser("~"), ".universal_downloader")
     os.makedirs(cfg_dir, exist_ok=True)
     return os.path.join(cfg_dir, "settings.json")
 
@@ -74,6 +74,31 @@ def save_destination(dest_path):
     except Exception:
         pass
 
+# Platform detection helper
+def detect_platform(url):
+    u = url.lower()
+    if "youtube.com" in u or "youtu.be" in u:
+        return "YouTube"
+    elif "instagram.com" in u:
+        return "Instagram"
+    elif "tiktok.com" in u:
+        return "TikTok"
+    elif "facebook.com" in u or "fb.watch" in u or "fb.com" in u:
+        return "Facebook"
+    elif "x.com" in u or "twitter.com" in u:
+        return "X / Twitter"
+    elif "reddit.com" in u or "redd.it" in u:
+        return "Reddit"
+    elif "pinterest.com" in u or "pin.it" in u:
+        return "Pinterest"
+    elif "vimeo.com" in u:
+        return "Vimeo"
+    elif "soundcloud.com" in u:
+        return "SoundCloud"
+    elif "twitch.tv" in u:
+        return "Twitch"
+    return "Universal Web"
+
 # Primary Font Configuration
 FONT_FAMILY = "Sebino Soft Regular"
 
@@ -98,7 +123,7 @@ def clean_filename(title, idx, max_len=75):
 
 def get_core_title_key(title):
     t_clean = re.sub(r'\(.*?\)|\[.*?\]', '', title)
-    t_clean = re.sub(r'\b(full video|lyric video|lyrics|lyrical|full song|official audio song|official audio|audio song|song|audio|hd|official|video|timeless classics|remastered|4k)\b', '', t_clean, flags=re.IGNORECASE)
+    t_clean = re.sub(r'\b(full video|lyric video|lyrics|lyrical|full song|official audio song|official audio|audio song|song|audio|hd|official|video|timeless classics|remastered|4k|reel|tiktok|post)\b', '', t_clean, flags=re.IGNORECASE)
     parts = re.split(r'[-|:]', t_clean)
     parts = [p.strip() for p in parts if p.strip()]
     if not parts:
@@ -109,14 +134,14 @@ def get_core_title_key(title):
     return candidate
 
 
-class YouTubeDownloaderApp(ctk.CTk):
+class UniversalDownloaderApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
         # Appearance & Geometry
         ctk.set_appearance_mode("Dark")
         ctk.set_default_color_theme("blue")
-        self.title("YouTube Downloader")
+        self.title("Universal Downloader · YouTube, Instagram, TikTok, Facebook, X")
         self.geometry("1160x820")
         self.minsize(1020, 720)
 
@@ -127,25 +152,25 @@ class YouTubeDownloaderApp(ctk.CTk):
         self.log_queue = queue.Queue()
         self.current_analysis = None
         self.is_downloading = False
-        self.current_mode = "audio" # "audio" or "video"
+        self.current_mode = "video" # Default to video for multi-platform clips
 
         # Download Manager items state
         self.manager_items = {} # title -> dict(card_widget, status_lbl, path)
 
         # Format mappings
-        self.audio_formats = {
-            "MP3 · Old Speaker / USB (128 kbps CBR, 44.1kHz, ID3v2.3)": "mp3_speaker",
-            "MP3 · Maximum Quality (320 kbps)": "mp3_320",
-            "MP3 · High Quality (192 kbps)": "mp3_192",
-            "M4A · Original AAC Audio Stream": "m4a"
-        }
         self.video_formats = {
+            "MP4 Video · Best Available Quality": "video_best",
             "MP4 Video · 1080p Full HD": "video_1080",
             "MP4 Video · 720p HD": "video_720",
-            "MP4 Video · Best Available Quality": "video_best",
             "MP4 Video · 480p": "video_480"
         }
-        self.all_formats = {**self.audio_formats, **self.video_formats}
+        self.audio_formats = {
+            "MP3 · Maximum Quality (320 kbps)": "mp3_320",
+            "MP3 · High Quality (192 kbps)": "mp3_192",
+            "MP3 · Standard / USB (128 kbps CBR, 44.1kHz, ID3v2.3)": "mp3_speaker",
+            "M4A · Original Audio Stream": "m4a"
+        }
+        self.all_formats = {**self.video_formats, **self.audio_formats}
 
         # Build UI Components
         self.create_layout()
@@ -159,6 +184,7 @@ class YouTubeDownloaderApp(ctk.CTk):
         """
         Luxurious Gold + Sebino Soft Design System:
         - Primary typography: Sebino Soft Regular
+        - Universal support: YouTube, Facebook, Instagram, TikTok, X (Twitter), Reddit, etc.
         - Color palette: Deep obsidian canvas (#09090B) with rich gold accents (#D4AF37, #E5C158)
         - Clean and minimal top header
         - Left sidebar: Dedicated Download Manager
@@ -197,7 +223,7 @@ class YouTubeDownloaderApp(ctk.CTk):
             "pill_bg": "#16161D",
         }
 
-        # ---------------- 1. TOP HEADER (Clean, Minimal, No Engine Status) ----------------
+        # ---------------- 1. TOP HEADER ----------------
         top_bar = ctk.CTkFrame(
             self, height=52, corner_radius=0,
             fg_color=self.tokens["bg"],
@@ -218,14 +244,14 @@ class YouTubeDownloaderApp(ctk.CTk):
         lbl_logo.pack(side="left", padx=(0, 8))
 
         lbl_title = ctk.CTkLabel(
-            brand_frame, text="YOUTUBE DOWNLOADER",
+            brand_frame, text="UNIVERSAL DOWNLOADER",
             font=ctk.CTkFont(family=FONT_FAMILY, size=13, weight="bold"),
             text_color=self.tokens["text_primary"]
         )
         lbl_title.pack(side="left")
 
         lbl_tag = ctk.CTkLabel(
-            brand_frame, text="· NATIVE DESKTOP SUITE",
+            brand_frame, text="· YOUTUBE, IG, TIKTOK, FB, X & 1000+ SITES",
             font=ctk.CTkFont(family=FONT_FAMILY, size=10),
             text_color=self.tokens["text_muted"]
         )
@@ -233,7 +259,7 @@ class YouTubeDownloaderApp(ctk.CTk):
 
         # Right side: Minimal version mark
         lbl_ver = ctk.CTkLabel(
-            top_bar, text="v1.3.0",
+            top_bar, text="v2.0.0",
             font=ctk.CTkFont(family=FONT_FAMILY, size=10),
             text_color=self.tokens["text_muted"]
         )
@@ -287,7 +313,7 @@ class YouTubeDownloaderApp(ctk.CTk):
 
         # Empty State Label
         self.lbl_dm_empty = ctk.CTkLabel(
-            self.scroll_manager, text="No active downloads yet.\nPaste a link to start downloading.",
+            self.scroll_manager, text="No active downloads yet.\nPaste any video or audio link to start.",
             font=ctk.CTkFont(family=FONT_FAMILY, size=10),
             text_color=self.tokens["text_muted"], justify="center"
         )
@@ -334,7 +360,7 @@ class YouTubeDownloaderApp(ctk.CTk):
 
         # 1. URL Input Block
         ctk.CTkLabel(
-            controls_panel, text="01 / SOURCE LINK",
+            controls_panel, text="01 / SOURCE LINK (YOUTUBE, INSTAGRAM, TIKTOK, FACEBOOK, X & MORE)",
             font=ctk.CTkFont(family=FONT_FAMILY, size=10, weight="bold"),
             text_color=self.tokens["text_muted"]
         ).pack(anchor="w", pady=(0, 6))
@@ -343,7 +369,7 @@ class YouTubeDownloaderApp(ctk.CTk):
         url_row.pack(fill="x", pady=(0, 10))
 
         self.entry_url = ctk.CTkEntry(
-            url_row, placeholder_text="Paste YouTube video or playlist URL...",
+            url_row, placeholder_text="Paste link from YouTube, Instagram, TikTok, Facebook, X, or any site...",
             height=40, corner_radius=4,
             border_width=1, border_color=self.tokens["border"],
             fg_color=self.tokens["surface"], text_color=self.tokens["text_primary"],
@@ -400,7 +426,7 @@ class YouTubeDownloaderApp(ctk.CTk):
         self.chip_items = self.create_metric_pill(self.chips_row, "ITEMS", "0")
         self.chip_duration = self.create_metric_pill(self.chips_row, "DURATION", "0m")
         self.chip_size = self.create_metric_pill(self.chips_row, "EST. SIZE", "--")
-        self.chip_spec = self.create_metric_pill(self.chips_row, "PROFILE", "128k MP3")
+        self.chip_spec = self.create_metric_pill(self.chips_row, "PROFILE", "1080p MP4")
 
         self.frame_analysis.pack_forget()
 
@@ -414,7 +440,7 @@ class YouTubeDownloaderApp(ctk.CTk):
             text_color=self.tokens["text_muted"]
         ).pack(side="left")
 
-        # Gold Segmented Switcher ([ ♫ AUDIO ] / [ 🎬 VIDEO ])
+        # Gold Segmented Switcher ([ 🎬 VIDEO ] / [ ♫ AUDIO ])
         segmented_switcher = ctk.CTkFrame(
             spec_header, corner_radius=4,
             fg_color=self.tokens["surface"],
@@ -422,25 +448,25 @@ class YouTubeDownloaderApp(ctk.CTk):
         )
         segmented_switcher.pack(side="right")
 
-        self.btn_mode_audio = ctk.CTkButton(
-            segmented_switcher, text="♫ AUDIO", width=76, height=26, corner_radius=3,
-            font=ctk.CTkFont(family=FONT_FAMILY, size=10, weight="bold"),
-            fg_color=self.tokens["gold"], hover_color=self.tokens["gold_hover"],
-            text_color=self.tokens["gold_text_dark"], command=lambda: self.switch_mode("audio")
-        )
-        self.btn_mode_audio.pack(side="left", padx=2, pady=2)
-
         self.btn_mode_video = ctk.CTkButton(
             segmented_switcher, text="🎬 VIDEO", width=76, height=26, corner_radius=3,
             font=ctk.CTkFont(family=FONT_FAMILY, size=10, weight="bold"),
-            fg_color="transparent", hover_color=self.tokens["surface_hover"],
-            text_color=self.tokens["text_secondary"], command=lambda: self.switch_mode("video")
+            fg_color=self.tokens["gold"], hover_color=self.tokens["gold_hover"],
+            text_color=self.tokens["gold_text_dark"], command=lambda: self.switch_mode("video")
         )
         self.btn_mode_video.pack(side="left", padx=2, pady=2)
 
+        self.btn_mode_audio = ctk.CTkButton(
+            segmented_switcher, text="♫ AUDIO", width=76, height=26, corner_radius=3,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=10, weight="bold"),
+            fg_color="transparent", hover_color=self.tokens["surface_hover"],
+            text_color=self.tokens["text_secondary"], command=lambda: self.switch_mode("audio")
+        )
+        self.btn_mode_audio.pack(side="left", padx=2, pady=2)
+
         # Format selector dropdown
         self.combo_format = ctk.CTkComboBox(
-            controls_panel, values=list(self.audio_formats.keys()),
+            controls_panel, values=list(self.video_formats.keys()),
             height=38, corner_radius=4,
             border_width=1, border_color=self.tokens["border"],
             fg_color=self.tokens["surface"],
@@ -450,10 +476,10 @@ class YouTubeDownloaderApp(ctk.CTk):
             dropdown_font=ctk.CTkFont(family=FONT_FAMILY, size=11), command=self.on_format_changed
         )
         self.combo_format.pack(fill="x", pady=(0, 4))
-        self.combo_format.set("MP3 · Old Speaker / USB (128 kbps CBR, 44.1kHz, ID3v2.3)")
+        self.combo_format.set("MP4 Video · Best Available Quality")
 
         self.lbl_format_hint = ctk.CTkLabel(
-            controls_panel, text="[SPEC] 128k Constant Bitrate · 44.1kHz Stereo · Stripped Artwork · FAT32 Clean Filenames",
+            controls_panel, text="[SPEC] Best Quality MP4 Video · Audio Muxed · Universal Codec Compatibility",
             font=ctk.CTkFont(family=FONT_FAMILY, size=10), text_color=self.tokens["text_muted"], anchor="w"
         )
         self.lbl_format_hint.pack(fill="x", pady=(0, 10))
@@ -621,8 +647,8 @@ class YouTubeDownloaderApp(ctk.CTk):
         )
         self.txt_terminal.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 10))
 
-        self.append_log("[SYS] YouTube Downloader initialized.")
-        self.append_log("[SYS] Paste a YouTube link above, choose format, and click START DOWNLOAD.")
+        self.append_log("[SYS] Universal Media Downloader initialized.")
+        self.append_log("[SYS] Native support: YouTube, Facebook, Instagram, TikTok, X (Twitter), Reddit & 1000+ sites.")
 
     def create_metric_pill(self, parent, label, initial_val):
         """Helper to create a Gold-accented metric badge pill."""
@@ -662,7 +688,7 @@ class YouTubeDownloaderApp(ctk.CTk):
             elif "Downloading" in status_text:
                 data["status_lbl"].configure(text_color=self.tokens["gold"])
             else:
-                data["status_lbl"].configure(text_color=self.tokens["text_muted"])
+                data["status_lbl"].configure(text=self.tokens["text_muted"])
             if filepath:
                 data["path"] = filepath
             return
@@ -688,7 +714,7 @@ class YouTubeDownloaderApp(ctk.CTk):
         row = ctk.CTkFrame(card, fg_color="transparent")
         row.pack(fill="x", padx=8, pady=(0, 6))
 
-        fmt_short = format_label.split("·")[0].strip() if "·" in format_label else (format_label[:14] if format_label else "Audio")
+        fmt_short = format_label.split("·")[0].strip() if "·" in format_label else (format_label[:14] if format_label else "Media")
         ctk.CTkLabel(
             row, text=fmt_short,
             font=ctk.CTkFont(family=FONT_FAMILY, size=8),
@@ -749,12 +775,12 @@ class YouTubeDownloaderApp(ctk.CTk):
         dest = self.entry_dest.get().strip() or get_default_download_dir()
         try:
             if os.path.exists(dest):
-                files = [f for f in os.listdir(dest) if f.lower().endswith(('.mp3', '.m4a', '.mp4', '.mkv'))]
+                files = [f for f in os.listdir(dest) if f.lower().endswith(('.mp3', '.m4a', '.mp4', '.mkv', '.webm'))]
                 # Sort by modification time descending
                 files.sort(key=lambda f: os.path.getmtime(os.path.join(dest, f)), reverse=True)
                 for f in files[:15]:
                     full_p = os.path.join(dest, f)
-                    fmt_tag = "MP4 Video" if f.lower().endswith(('.mp4', '.mkv')) else "MP3 Audio"
+                    fmt_tag = "MP4 Video" if f.lower().endswith(('.mp4', '.mkv', '.webm')) else "MP3 Audio"
                     self.add_manager_item(f, f, "✓ Saved", fmt_tag, full_p)
         except Exception:
             pass
@@ -762,23 +788,9 @@ class YouTubeDownloaderApp(ctk.CTk):
     # ---------------- UI Event Handlers ----------------
 
     def switch_mode(self, mode):
-        """Toggle between Audio and Video mode via Gold segmented pills."""
+        """Toggle between Video and Audio mode via Gold segmented pills."""
         self.current_mode = mode
-        if mode == "audio":
-            self.btn_mode_audio.configure(
-                fg_color=self.tokens["gold"],
-                hover_color=self.tokens["gold_hover"],
-                text_color=self.tokens["gold_text_dark"]
-            )
-            self.btn_mode_video.configure(
-                fg_color="transparent",
-                hover_color=self.tokens["surface_hover"],
-                text_color=self.tokens["text_secondary"]
-            )
-            self.combo_format.configure(values=list(self.audio_formats.keys()))
-            self.combo_format.set("MP3 · Old Speaker / USB (128 kbps CBR, 44.1kHz, ID3v2.3)")
-            self.on_format_changed("MP3 · Old Speaker / USB (128 kbps CBR, 44.1kHz, ID3v2.3)")
-        else:
+        if mode == "video":
             self.btn_mode_video.configure(
                 fg_color=self.tokens["gold"],
                 hover_color=self.tokens["gold_hover"],
@@ -790,8 +802,22 @@ class YouTubeDownloaderApp(ctk.CTk):
                 text_color=self.tokens["text_secondary"]
             )
             self.combo_format.configure(values=list(self.video_formats.keys()))
-            self.combo_format.set("MP4 Video · 1080p Full HD")
-            self.on_format_changed("MP4 Video · 1080p Full HD")
+            self.combo_format.set("MP4 Video · Best Available Quality")
+            self.on_format_changed("MP4 Video · Best Available Quality")
+        else:
+            self.btn_mode_audio.configure(
+                fg_color=self.tokens["gold"],
+                hover_color=self.tokens["gold_hover"],
+                text_color=self.tokens["gold_text_dark"]
+            )
+            self.btn_mode_video.configure(
+                fg_color="transparent",
+                hover_color=self.tokens["surface_hover"],
+                text_color=self.tokens["text_secondary"]
+            )
+            self.combo_format.configure(values=list(self.audio_formats.keys()))
+            self.combo_format.set("MP3 · Maximum Quality (320 kbps)")
+            self.on_format_changed("MP3 · Maximum Quality (320 kbps)")
 
     def paste_from_clipboard(self):
         try:
@@ -799,17 +825,17 @@ class YouTubeDownloaderApp(ctk.CTk):
             if txt:
                 self.entry_url.delete(0, "end")
                 self.entry_url.insert(0, txt)
-                if "youtube.com" in txt or "youtu.be" in txt:
+                if txt.startswith("http://") or txt.startswith("https://"):
                     self.trigger_analyze()
         except Exception:
             pass
 
     def on_format_changed(self, choice):
-        selected_code = self.all_formats.get(choice, "mp3_speaker")
+        selected_code = self.all_formats.get(choice, "video_best")
 
         if selected_code.startswith("video_"):
             self.lbl_format_hint.configure(
-                text=f"[SPEC] {selected_code.replace('video_', '').upper()} MP4 Video · Audio Muxed · FFmpeg Encoded"
+                text=f"[SPEC] {selected_code.replace('video_', '').upper()} MP4 Video · Audio Muxed · Universal Codec Compatibility"
             )
         else:
             if selected_code == "mp3_speaker":
@@ -852,16 +878,17 @@ class YouTubeDownloaderApp(ctk.CTk):
         self.txt_terminal.delete("1.0", "end")
         self.append_log("[SYS] Activity log cleared.")
 
-    # ---------------- Link Analysis ----------------
+    # ---------------- Link Analysis (Universal) ----------------
 
     def trigger_analyze(self):
         url = self.entry_url.get().strip()
         if not url:
-            messagebox.showwarning("Notice", "Please paste a YouTube link first.")
+            messagebox.showwarning("Notice", "Please paste a video or audio link first.")
             return
 
+        platform_name = detect_platform(url)
         self.btn_analyze.configure(state="disabled", text="CHECKING")
-        self.append_log(f"[GET] Inspecting link: {url}")
+        self.append_log(f"[GET] Inspecting {platform_name} link: {url}")
 
         def worker():
             try:
@@ -874,30 +901,61 @@ class YouTubeDownloaderApp(ctk.CTk):
         self.analysis_thread.start()
 
     def fetch_analysis(self, url):
-        ydl_opts = {'quiet': True, 'extract_flat': True}
+        platform = detect_platform(url)
+        ydl_opts = {
+            'quiet': True,
+            'extract_flat': True,
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+            }
+        }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
-            is_playlist = 'entries' in info
-            entries = list(info.get('entries', [])) if is_playlist else [info]
+            is_playlist = 'entries' in info and bool(info.get('entries'))
+            entries = [e for e in info.get('entries', []) if e] if is_playlist else [info]
 
             valid = []
             total_dur = 0
             for e in entries:
-                t = e.get('title')
+                if not e:
+                    continue
+                t = e.get('title') or info.get('title') or f"{platform} Media"
                 dur = e.get('duration') or 0
-                if t and not t.startswith('['):
-                    valid.append({'id': e.get('id'), 'title': t, 'duration': dur})
-                    total_dur += dur
+                item_url = e.get('webpage_url') or e.get('url') or e.get('original_url')
+                if not item_url:
+                    if ('youtube' in url.lower() or 'youtu.be' in url.lower()) and e.get('id'):
+                        item_url = f"https://www.youtube.com/watch?v={e['id']}"
+                    else:
+                        item_url = url
+                valid.append({
+                    'id': e.get('id') or str(len(valid) + 1),
+                    'title': t,
+                    'duration': dur,
+                    'url': item_url,
+                    'platform': platform
+                })
+                total_dur += dur
 
             total_hours = total_dur / 3600
-            dur_str = f"{int(total_hours)}h {int((total_dur%3600)/60)}m" if total_hours >= 1 else f"{int(total_dur/60)}m {int(total_dur%60)}s"
+            if total_hours >= 1:
+                dur_str = f"{int(total_hours)}h {int((total_dur%3600)/60)}m"
+            elif total_dur >= 60:
+                dur_str = f"{int(total_dur/60)}m {int(total_dur%60)}s"
+            elif total_dur > 0:
+                dur_str = f"{int(total_dur)}s"
+            else:
+                dur_str = "Clip"
+
+            media_title = info.get('title') or (valid[0]['title'] if valid else f"{platform} Media")
 
             return {
-                "title": info.get('title') or "YouTube Media",
+                "title": media_title,
+                "platform": platform,
                 "is_playlist": is_playlist,
                 "track_count": len(valid),
                 "duration_str": dur_str,
-                "total_duration": total_dur
+                "total_duration": total_dur,
+                "items": valid
             }
 
     def on_analysis_success(self, res):
@@ -905,38 +963,40 @@ class YouTubeDownloaderApp(ctk.CTk):
         self.btn_analyze.configure(state="normal", text="INSPECT")
         self.frame_analysis.pack(fill="x", pady=(0, 10))
         self.update_analysis_meta(res)
-        self.append_log(f"[OK] Link verified: '{res['title']}' ({res['track_count']} items, {res['duration_str']})")
+        self.append_log(f"[OK] {res['platform']} link verified: '{res['title']}' ({res['track_count']} item(s), {res['duration_str']})")
 
     def update_analysis_meta(self, res):
-        chosen_format = self.all_formats.get(self.combo_format.get(), "mp3_speaker")
+        chosen_format = self.all_formats.get(self.combo_format.get(), "video_best")
         dur = res["total_duration"]
+        platform = res.get("platform", "Media")
 
         if chosen_format.startswith("video_"):
             if chosen_format in ("video_720", "video_480"):
-                mb = (320000 * dur) / (1024 * 1024)
+                mb = max(5.0, (320000 * max(10, dur)) / (1024 * 1024))
             else:
-                mb = (580000 * dur) / (1024 * 1024)
+                mb = max(10.0, (580000 * max(10, dur)) / (1024 * 1024))
             est_str = f"{mb/1024:.2f} GB" if mb >= 1024 else f"{mb:.1f} MB"
             profile_str = f"{chosen_format.replace('video_', '').upper()} MP4"
         elif chosen_format == "mp3_320":
-            mb = (40000 * dur) / (1024 * 1024)
+            mb = max(2.0, (40000 * max(10, dur)) / (1024 * 1024))
             est_str = f"{mb/1024:.2f} GB" if mb >= 1024 else f"{mb:.1f} MB"
             profile_str = "320k MP3"
         elif chosen_format == "mp3_192":
-            mb = (24000 * dur) / (1024 * 1024)
+            mb = max(1.5, (24000 * max(10, dur)) / (1024 * 1024))
             est_str = f"{mb/1024:.2f} GB" if mb >= 1024 else f"{mb:.1f} MB"
             profile_str = "192k MP3"
         elif chosen_format == "m4a":
-            mb = (16000 * dur) / (1024 * 1024)
+            mb = max(1.0, (16000 * max(10, dur)) / (1024 * 1024))
             est_str = f"{mb/1024:.2f} GB" if mb >= 1024 else f"{mb:.1f} MB"
             profile_str = "AAC M4A"
         else:
-            mb = (16000 * dur) / (1024 * 1024)
+            mb = max(1.0, (16000 * max(10, dur)) / (1024 * 1024))
             est_str = f"{mb/1024:.2f} GB" if mb >= 1024 else f"{mb:.1f} MB"
             profile_str = "128k CBR MP3"
 
+        self.lbl_an_badge.configure(text=f"▶ VERIFIED {platform.upper()}")
         self.lbl_an_title.configure(text=res['title'])
-        self.chip_items.configure(text=f"{res['track_count']} items")
+        self.chip_items.configure(text=f"{res['track_count']} item(s)")
         self.chip_duration.configure(text=res['duration_str'])
         self.chip_size.configure(text=est_str)
         self.chip_spec.configure(text=profile_str)
@@ -945,12 +1005,12 @@ class YouTubeDownloaderApp(ctk.CTk):
         self.btn_analyze.configure(state="normal", text="INSPECT")
         self.append_log(f"[ERR] Inspection failed: {err}")
 
-    # ---------------- Download Engine ----------------
+    # ---------------- Universal Download Engine ----------------
 
     def start_download(self):
         url = self.entry_url.get().strip()
         if not url:
-            messagebox.showwarning("Notice", "Please paste a YouTube link before downloading.")
+            messagebox.showwarning("Notice", "Please paste a media link before downloading.")
             return
 
         dest_dir = self.entry_dest.get().strip()
@@ -959,7 +1019,7 @@ class YouTubeDownloaderApp(ctk.CTk):
         save_destination(dest_dir)
 
         chosen_label = self.combo_format.get()
-        download_type = self.all_formats.get(chosen_label, "mp3_speaker")
+        download_type = self.all_formats.get(chosen_label, "video_best")
         ignore_dups = self.var_ignore_dups.get()
 
         max_tracks = 0
@@ -972,7 +1032,7 @@ class YouTubeDownloaderApp(ctk.CTk):
         self.btn_download.configure(state="disabled")
         self.btn_stop.configure(state="normal")
         self.progress_bar.set(0)
-        self.lbl_progress_status.configure(text="Initializing download queue...")
+        self.lbl_progress_status.configure(text="Initializing universal download engine...")
         self.lbl_hud_speed.configure(text="SPEED: --")
         self.lbl_hud_eta.configure(text="ETA: --")
         self.lbl_progress_meta.configure(text="0%")
@@ -1007,14 +1067,22 @@ class YouTubeDownloaderApp(ctk.CTk):
 
         is_video = download_type.startswith("video_")
         is_speaker = (download_type == "mp3_speaker")
-        video_quality = download_type.replace("video_", "") if is_video else "1080"
+        video_quality = download_type.replace("video_", "") if is_video else "best"
         bitrate = "320" if download_type == "mp3_320" else ("192" if download_type == "mp3_192" else "128")
 
-        self.append_log(f"[QUEUE] Target path: {dest_dir}")
+        platform = detect_platform(url)
+        self.append_log(f"[QUEUE] Platform detected: {platform}")
+        self.append_log(f"[QUEUE] Target directory: {dest_dir}")
         self.append_log(f"[QUEUE] Format profile: {download_type}")
 
-        # Fetch playlist / video info
-        ydl_opts = {'quiet': True, 'extract_flat': True}
+        # Extract info
+        ydl_opts = {
+            'quiet': True,
+            'extract_flat': True,
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+            }
+        }
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
@@ -1023,13 +1091,14 @@ class YouTubeDownloaderApp(ctk.CTk):
             self.after(0, self.finish_download)
             return
 
-        entries = list(info.get('entries', [])) if 'entries' in info else [info]
+        is_playlist = 'entries' in info and bool(info.get('entries'))
+        entries = [e for e in info.get('entries', []) if e] if is_playlist else [info]
 
-        # Scan existing files for duplicate check & index numbering
+        # Scan existing files for duplicate check
         if is_video:
-            existing_files = [f for f in os.listdir(dest_dir) if f.lower().endswith(('.mp4', '.mkv', '.webm'))]
+            existing_files = [f for f in os.listdir(dest_dir) if f.lower().endswith(('.mp4', '.mkv', '.webm', '.mov'))]
         else:
-            existing_files = [f for f in os.listdir(dest_dir) if f.lower().endswith(('.mp3', '.m4a', '.opus'))]
+            existing_files = [f for f in os.listdir(dest_dir) if f.lower().endswith(('.mp3', '.m4a', '.opus', '.aac'))]
 
         existing_keys = set()
         max_idx = 0
@@ -1046,29 +1115,36 @@ class YouTubeDownloaderApp(ctk.CTk):
         queue_items = []
         seen_keys = set()
         for idx, e in enumerate(entries, 1):
-            vid = e.get('id')
-            title = e.get('title')
-            dur = e.get('duration') or 0
-            if not vid or not title or title.startswith('['):
+            if not e:
                 continue
-            k = get_core_title_key(title)
+            t = e.get('title') or info.get('title') or f"{platform}_Track_{idx}"
+            vid = e.get('id') or str(idx)
+            dur = e.get('duration') or 0
+            item_url = e.get('webpage_url') or e.get('url') or e.get('original_url')
+            if not item_url:
+                if ('youtube' in url.lower() or 'youtu.be' in url.lower()) and e.get('id'):
+                    item_url = f"https://www.youtube.com/watch?v={e['id']}"
+                else:
+                    item_url = url
+
+            k = get_core_title_key(t)
             if ignore_dups:
                 if k in existing_keys:
-                    self.append_log(f"[SKIP] Existing: {title}")
+                    self.append_log(f"[SKIP] Existing: {t}")
                     continue
                 if k in seen_keys:
-                    self.append_log(f"[SKIP] Duplicate in batch: {title}")
+                    self.append_log(f"[SKIP] Duplicate in batch: {t}")
                     continue
             seen_keys.add(k)
-            queue_items.append({'id': vid, 'title': title, 'duration': dur, 'key': k})
+            queue_items.append({'id': vid, 'title': t, 'duration': dur, 'url': item_url, 'key': k})
             if max_tracks > 0 and len(queue_items) >= max_tracks:
                 break
 
         total_queue = len(queue_items)
-        self.append_log(f"[QUEUE] {total_queue} items queued for processing.")
+        self.append_log(f"[QUEUE] {total_queue} item(s) queued for download.")
 
         if total_queue == 0:
-            self.append_log("[OK] All items are already downloaded and verified.")
+            self.append_log("[OK] All requested items already exist in destination.")
             self.after(0, self.finish_download)
             return
 
@@ -1094,14 +1170,14 @@ class YouTubeDownloaderApp(ctk.CTk):
 
         for i, item in enumerate(queue_items):
             if self.stop_event.is_set():
-                self.append_log("[STOP] Process interrupted by user.")
+                self.append_log("[STOP] Download process interrupted by user.")
                 break
 
             current_idx = i + 1
             track_num = start_num + i
             cleaned = clean_filename(item['title'], track_num)
             ext_target = "mp4" if is_video else ("m4a" if download_type == "m4a" else "mp3")
-            filename_base = f"{track_num:03d} - {cleaned}"
+            filename_base = f"{track_num:03d} - {cleaned}" if total_queue > 1 else cleaned
             full_target_path = os.path.join(dest_dir, f"{filename_base}.{ext_target}")
 
             # Register in Download Manager
@@ -1114,13 +1190,13 @@ class YouTubeDownloaderApp(ctk.CTk):
 
             if is_video:
                 if video_quality == 'best':
-                    fmt_str = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best'
+                    fmt_str = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best'
                 elif video_quality == '720':
-                    fmt_str = 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=720]+bestaudio/best'
+                    fmt_str = 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=720]+bestaudio/best[height<=720]/best'
                 elif video_quality == '480':
-                    fmt_str = 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=480]+bestaudio/best'
+                    fmt_str = 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=480]+bestaudio/best[height<=480]/best'
                 else:
-                    fmt_str = 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best'
+                    fmt_str = 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best'
 
                 opts = {
                     'quiet': True,
@@ -1130,6 +1206,9 @@ class YouTubeDownloaderApp(ctk.CTk):
                     'merge_output_format': 'mp4',
                     'outtmpl': os.path.join(dest_dir, f"{filename_base}.%(ext)s"),
                     'progress_hooks': [progress_hook],
+                    'http_headers': {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+                    }
                 }
             else:
                 postprocessors = []
@@ -1151,12 +1230,16 @@ class YouTubeDownloaderApp(ctk.CTk):
                     'outtmpl': os.path.join(dest_dir, f"{filename_base}.%(ext)s"),
                     'progress_hooks': [progress_hook],
                     'postprocessors': postprocessors,
-                    'postprocessor_args': postprocessor_args
+                    'postprocessor_args': postprocessor_args,
+                    'http_headers': {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+                    }
                 }
 
             try:
+                target_download_url = item.get('url') or url
                 with yt_dlp.YoutubeDL(opts) as ydl:
-                    ydl.download([f"https://www.youtube.com/watch?v={item['id']}"])
+                    ydl.download([target_download_url])
                 downloaded_count += 1
                 self.append_log(f"[OK] Saved: {filename_base}")
                 # Mark Done in Download Manager
@@ -1168,7 +1251,7 @@ class YouTubeDownloaderApp(ctk.CTk):
                 self.append_log(f"[ERR] Download error ({item['title']}): {e}")
                 self.after(0, lambda name=filename_base: self.add_manager_item(name, name, "✕ Failed", format_label))
 
-        self.append_log(f"[DONE] Completed. Downloaded {downloaded_count} items.")
+        self.append_log(f"[DONE] Completed. Downloaded {downloaded_count} item(s).")
         self.after(0, self.finish_download)
 
     def update_progress_ui(self, pct, speed, eta):
@@ -1198,6 +1281,9 @@ class YouTubeDownloaderApp(ctk.CTk):
             self.destroy()
 
 
+# Compatibility alias
+YouTubeDownloaderApp = UniversalDownloaderApp
+
 if __name__ == '__main__':
-    app = YouTubeDownloaderApp()
+    app = UniversalDownloaderApp()
     app.mainloop()
