@@ -188,12 +188,26 @@ def get_core_title_key(title):
 
 
 class CTkTooltip:
-    """Displays a sleek dark obsidian & gold 1-line tooltip when hovering for 2s+ or on long-press."""
+    """Displays a sleek dark obsidian & gold 1-line tooltip when hovering for 2s+ or on long-press.
+    Strict singleton manager guarantees at most ONE tooltip exists across the entire application."""
+    _current_window = None
+    _current_owner = None
+
+    @classmethod
+    def dismiss_active(cls):
+        """Immediately destroys any currently visible tooltip across the entire app."""
+        if cls._current_window:
+            try:
+                cls._current_window.destroy()
+            except Exception:
+                pass
+            cls._current_window = None
+            cls._current_owner = None
+
     def __init__(self, widget, text, delay_ms=2000):
         self.widget = widget
         self.text = text
         self.delay_ms = delay_ms
-        self.tip_window = None
         self.timer_id = None
         self.press_timer_id = None
 
@@ -203,24 +217,26 @@ class CTkTooltip:
         self.widget.bind("<ButtonRelease-1>", self.on_release, add="+")
 
     def on_enter(self, event=None):
+        # Entering any button immediately dismisses any older tooltip from another button
+        if CTkTooltip._current_owner is not self:
+            CTkTooltip.dismiss_active()
         self.schedule_tooltip()
 
     def on_leave(self, event=None):
+        self.cancel_timer()
         try:
             x, y = self.widget.winfo_pointerxy()
-            wx = self.widget.winfo_rootx()
-            wy = self.widget.winfo_rooty()
-            ww = self.widget.winfo_width()
-            wh = self.widget.winfo_height()
-            if wx <= x <= wx + ww and wy <= y <= wy + wh:
-                return
+            containing = self.widget.winfo_containing(x, y)
+            if containing and str(containing).startswith(str(self.widget)):
+                return  # Pointer is still within this widget's internal canvas or text label
         except Exception:
             pass
-        self.cancel_timer()
-        self.hide_tooltip()
+        if CTkTooltip._current_owner is self:
+            CTkTooltip.dismiss_active()
 
     def on_press(self, event=None):
         self.cancel_timer()
+        CTkTooltip.dismiss_active()
         if self.press_timer_id:
             try:
                 self.widget.after_cancel(self.press_timer_id)
@@ -249,7 +265,9 @@ class CTkTooltip:
             self.timer_id = None
 
     def show_tooltip(self):
-        if self.tip_window or not self.text:
+        # Destroy any previously active tooltip before creating a new one
+        CTkTooltip.dismiss_active()
+        if not self.text:
             return
         try:
             x = self.widget.winfo_rootx() + (self.widget.winfo_width() // 2)
@@ -257,7 +275,7 @@ class CTkTooltip:
         except Exception:
             return
 
-        self.tip_window = tw = tk.Toplevel(self.widget)
+        tw = tk.Toplevel(self.widget)
         tw.wm_overrideredirect(True)
         tw.wm_attributes("-topmost", True)
 
@@ -283,10 +301,12 @@ class CTkTooltip:
 
         tw.wm_geometry(f"+{pos_x}+{pos_y}")
 
+        CTkTooltip._current_window = tw
+        CTkTooltip._current_owner = self
+
     def hide_tooltip(self):
-        if self.tip_window:
-            self.tip_window.destroy()
-            self.tip_window = None
+        if CTkTooltip._current_owner is self:
+            CTkTooltip.dismiss_active()
 
 
 class UniversalDownloaderApp(ctk.CTk):
@@ -333,6 +353,10 @@ class UniversalDownloaderApp(ctk.CTk):
         self.create_layout()
         self.load_initial_downloads()
         self.poll_log_queue()
+
+        # Global dismiss for active tooltips upon clicks or window repositioning
+        self.bind_all("<Button-1>", lambda _e: CTkTooltip.dismiss_active(), add="+")
+        self.bind("<Configure>", lambda _e: CTkTooltip.dismiss_active(), add="+")
 
         # Handle clean exit
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
