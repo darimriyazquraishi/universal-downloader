@@ -77,8 +77,8 @@ class YouTubeDownloaderApp(ctk.CTk):
         ctk.set_appearance_mode("Dark")
         ctk.set_default_color_theme("blue")
         self.title("YouTube Downloader")
-        self.geometry("1180x820")
-        self.minsize(1000, 760)
+        self.geometry("1100x780")
+        self.minsize(960, 700)
 
         # State Variables
         self.stop_event = threading.Event()
@@ -97,312 +97,380 @@ class YouTubeDownloaderApp(ctk.CTk):
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
     def create_layout(self):
-        """Build the main desktop UI with a focused, consumer-app layout."""
-        self.configure(fg_color="#0B1020")
-        self.grid_rowconfigure(0, weight=0)
-        self.grid_rowconfigure(1, weight=1)
+        """
+        ArtCraft + Impeccable Design System:
+        - Deep industrial black palette (#0B0B0C)
+        - Hairline 1px borders (#1C1C1F, #26262B)
+        - Monospace technical HUD tags
+        - Sharp, precise geometry (no puffy bubble cards or card-in-card nesting)
+        - High contrast crisp typography & signature inverted monochrome CTA
+        """
+        self.configure(fg_color="#0B0B0C")
+        self.grid_rowconfigure(0, weight=0) # Header
+        self.grid_rowconfigure(1, weight=1) # Main Workbench
         self.grid_columnconfigure(0, weight=1)
 
-        # Palette is intentionally centralized here so the whole app feels cohesive.
-        self.ui = {
-            "bg": "#0B1020",
-            "sidebar": "#0F172A",
-            "panel": "#111827",
-            "panel_alt": "#172033",
-            "border": "#263247",
-            "text": "#F8FAFC",
-            "muted": "#94A3B8",
-            "accent": "#6D7CFF",
-            "accent_hover": "#5968F0",
-            "green": "#34D399",
-            "red": "#F87171",
-            "amber": "#FBBF24",
+        # Style Tokens
+        self.tokens = {
+            "bg": "#0B0B0C",
+            "sidebar": "#0E0E10",
+            "surface": "#121214",
+            "surface_elevated": "#18181B",
+            "border": "#1F1F24",
+            "border_strong": "#2E2E35",
+            "text_primary": "#F4F4F5",
+            "text_secondary": "#A1A1AA",
+            "text_muted": "#71717A",
+            "cta_bg": "#FFFFFF",
+            "cta_fg": "#000000",
+            "cta_hover": "#E4E4E7",
+            "emerald": "#10B981",
+            "rose": "#F43F5E",
+            "amber": "#F59E0B",
+            "cyan": "#06B6D4"
         }
 
-        # Top bar
-        top_bar = ctk.CTkFrame(self, height=72, corner_radius=0, fg_color=self.ui["bg"])
+        # ---------------- 1. TOP HEADER (Hairline Border) ----------------
+        top_bar = ctk.CTkFrame(self, height=50, corner_radius=0, fg_color=self.tokens["bg"], border_width=1, border_color=self.tokens["border"])
         top_bar.grid(row=0, column=0, sticky="ew")
         top_bar.grid_columnconfigure(1, weight=1)
         top_bar.grid_propagate(False)
 
-        logo = ctk.CTkFrame(top_bar, width=42, height=42, corner_radius=13,
-                             fg_color=self.ui["accent"])
-        logo.grid(row=0, column=0, padx=(22, 12), pady=14)
-        logo.grid_propagate(False)
-        ctk.CTkLabel(logo, text="↓", font=ctk.CTkFont(size=28, weight="bold"),
-                     text_color="#FFFFFF").place(relx=0.5, rely=0.46, anchor="center")
+        # Brand Mark
+        brand_frame = ctk.CTkFrame(top_bar, fg_color="transparent")
+        brand_frame.grid(row=0, column=0, padx=16, pady=8, sticky="w")
 
-        brand = ctk.CTkFrame(top_bar, fg_color="transparent")
-        brand.grid(row=0, column=1, sticky="w", pady=10)
-        ctk.CTkLabel(brand, text="YouTube Downloader",
-                     font=ctk.CTkFont(size=17, weight="bold"),
-                     text_color=self.ui["text"]).pack(anchor="w")
-        ctk.CTkLabel(brand, text="Audio and video, without the clutter",
-                     font=ctk.CTkFont(size=11), text_color=self.ui["muted"]).pack(anchor="w", pady=(1, 0))
+        lbl_logo = ctk.CTkLabel(brand_frame, text="[↓]", font=ctk.CTkFont(family="Consolas", size=14, weight="bold"), text_color=self.tokens["cta_bg"])
+        lbl_logo.pack(side="left", padx=(0, 8))
 
-        status_pill = ctk.CTkFrame(top_bar, corner_radius=11, fg_color=self.ui["panel_alt"])
-        status_pill.grid(row=0, column=2, padx=22, pady=18, sticky="e")
+        lbl_title = ctk.CTkLabel(brand_frame, text="YOUTUBE DOWNLOADER", font=ctk.CTkFont(family="Consolas", size=13, weight="bold"), text_color=self.tokens["text_primary"])
+        lbl_title.pack(side="left")
+
+        lbl_tag = ctk.CTkLabel(brand_frame, text=" · NATIVE ENGINE", font=ctk.CTkFont(family="Consolas", size=10), text_color=self.tokens["text_muted"])
+        lbl_tag.pack(side="left", padx=6)
+
+        # Status HUD (Right)
+        status_frame = ctk.CTkFrame(top_bar, fg_color="transparent")
+        status_frame.grid(row=0, column=2, padx=16, pady=8, sticky="e")
+
         self.lbl_header_status = ctk.CTkLabel(
-            status_pill, text="● Ready", font=ctk.CTkFont(size=11, weight="bold"),
-            text_color=self.ui["green"]
+            status_frame, text="● ENGINE READY",
+            font=ctk.CTkFont(family="Consolas", size=11, weight="bold"),
+            text_color=self.tokens["emerald"]
         )
-        self.lbl_header_status.pack(padx=13, pady=7)
+        self.lbl_header_status.pack(side="right")
 
-        # Workspace: compact destination sidebar + main download flow.
-        workbench = ctk.CTkFrame(self, corner_radius=0, fg_color=self.ui["bg"])
+        # ---------------- 2. WORKBENCH ----------------
+        workbench = ctk.CTkFrame(self, corner_radius=0, fg_color=self.tokens["bg"])
         workbench.grid(row=1, column=0, sticky="nsew")
         workbench.grid_rowconfigure(0, weight=1)
-        workbench.grid_columnconfigure(0, weight=0)
-        workbench.grid_columnconfigure(1, weight=1)
+        workbench.grid_columnconfigure(0, weight=0) # Sidebar
+        workbench.grid_columnconfigure(1, weight=1) # Main Viewport
 
-        sidebar = ctk.CTkFrame(workbench, width=220, corner_radius=0, fg_color=self.ui["sidebar"])
-        sidebar.grid(row=0, column=0, sticky="nsew", padx=(0, 1))
+        # ---------------- LEFT SIDEBAR (Explorer & Telemetry) ----------------
+        sidebar = ctk.CTkFrame(workbench, width=220, corner_radius=0, fg_color=self.tokens["sidebar"], border_width=1, border_color=self.tokens["border"])
+        sidebar.grid(row=0, column=0, sticky="nsew")
         sidebar.grid_propagate(False)
 
-        ctk.CTkLabel(sidebar, text="LIBRARY", font=ctk.CTkFont(size=10, weight="bold"),
-                     text_color=self.ui["muted"]).pack(anchor="w", padx=18, pady=(22, 10))
-        ctk.CTkLabel(sidebar, text="Quick destinations", font=ctk.CTkFont(size=12, weight="bold"),
-                     text_color=self.ui["text"]).pack(anchor="w", padx=18, pady=(0, 8))
+        # Header Label
+        ctk.CTkLabel(
+            sidebar, text="01 / DESTINATIONS",
+            font=ctk.CTkFont(family="Consolas", size=10, weight="bold"),
+            text_color=self.tokens["text_muted"]
+        ).pack(anchor="w", padx=16, pady=(16, 8))
 
         self.btn_dest_songs = ctk.CTkButton(
-            sidebar, text="♫   Music folder", anchor="w", height=39, corner_radius=10,
-            font=ctk.CTkFont(size=12), fg_color=self.ui["panel_alt"], hover_color="#26334B",
-            text_color=self.ui["text"], command=lambda: self.set_destination(DEFAULT_SONGS)
+            sidebar, text="♫  songs", anchor="w", height=32, corner_radius=3,
+            font=ctk.CTkFont(family="Consolas", size=11),
+            fg_color=self.tokens["surface_elevated"], hover_color=self.tokens["border_strong"],
+            text_color=self.tokens["text_primary"],
+            command=lambda: self.set_destination(DEFAULT_SONGS)
         )
-        self.btn_dest_songs.pack(fill="x", padx=10, pady=3)
+        self.btn_dest_songs.pack(fill="x", padx=10, pady=2)
 
         self.btn_dest_videos = ctk.CTkButton(
-            sidebar, text="▣   Video folder", anchor="w", height=39, corner_radius=10,
-            font=ctk.CTkFont(size=12), fg_color="transparent", hover_color="#1B2940",
-            text_color="#CBD5E1", command=lambda: self.set_destination(DEFAULT_VIDEOS)
+            sidebar, text="▣  videos", anchor="w", height=32, corner_radius=3,
+            font=ctk.CTkFont(family="Consolas", size=11),
+            fg_color="transparent", hover_color=self.tokens["surface_elevated"],
+            text_color=self.tokens["text_secondary"],
+            command=lambda: self.set_destination(DEFAULT_VIDEOS)
         )
-        self.btn_dest_videos.pack(fill="x", padx=10, pady=3)
+        self.btn_dest_videos.pack(fill="x", padx=10, pady=2)
 
         self.btn_dest_root = ctk.CTkButton(
-            sidebar, text="⌂   Main folder", anchor="w", height=39, corner_radius=10,
-            font=ctk.CTkFont(size=12), fg_color="transparent", hover_color="#1B2940",
-            text_color="#CBD5E1", command=lambda: self.set_destination(DEFAULT_ROOT)
+            sidebar, text="⌂  root folder", anchor="w", height=32, corner_radius=3,
+            font=ctk.CTkFont(family="Consolas", size=11),
+            fg_color="transparent", hover_color=self.tokens["surface_elevated"],
+            text_color=self.tokens["text_secondary"],
+            command=lambda: self.set_destination(DEFAULT_ROOT)
         )
-        self.btn_dest_root.pack(fill="x", padx=10, pady=3)
+        self.btn_dest_root.pack(fill="x", padx=10, pady=2)
 
         ctk.CTkButton(
-            sidebar, text="＋   Choose another folder", anchor="w", height=37, corner_radius=10,
-            font=ctk.CTkFont(size=11), fg_color="transparent", hover_color="#1B2940",
-            text_color=self.ui["muted"], border_width=1, border_color=self.ui["border"],
+            sidebar, text="+  custom path...", anchor="w", height=30, corner_radius=3,
+            font=ctk.CTkFont(family="Consolas", size=10),
+            fg_color="transparent", hover_color=self.tokens["surface_elevated"],
+            text_color=self.tokens["text_muted"],
+            border_width=1, border_color=self.tokens["border"],
             command=self.browse_folder
-        ).pack(fill="x", padx=10, pady=(12, 4))
+        ).pack(fill="x", padx=10, pady=(10, 4))
 
-        # Storage information is secondary, so it lives in a quiet card at the bottom.
-        storage_card = ctk.CTkFrame(sidebar, corner_radius=13, fg_color=self.ui["panel"],
-                                     border_width=1, border_color=self.ui["border"])
-        storage_card.pack(side="bottom", fill="x", padx=12, pady=16)
-        ctk.CTkLabel(storage_card, text="SYSTEM STATUS", font=ctk.CTkFont(size=9, weight="bold"),
-                     text_color=self.ui["muted"]).pack(anchor="w", padx=12, pady=(12, 7))
-        self.lbl_free_space = ctk.CTkLabel(storage_card, text="Free space: --",
-                                           font=ctk.CTkFont(size=11, weight="bold"),
-                                           text_color=self.ui["text"], anchor="w")
-        self.lbl_free_space.pack(fill="x", padx=12, pady=2)
-        self.lbl_drive = ctk.CTkLabel(storage_card, text="Drive: --",
-                                      font=ctk.CTkFont(size=10), text_color=self.ui["muted"], anchor="w")
-        self.lbl_drive.pack(fill="x", padx=12, pady=2)
-        self.lbl_ffmpeg_status = ctk.CTkLabel(storage_card, text="FFmpeg: Checking…",
-                                              font=ctk.CTkFont(size=10), text_color=self.ui["green"], anchor="w")
-        self.lbl_ffmpeg_status.pack(fill="x", padx=12, pady=(2, 12))
+        # Bottom System Telemetry (Docked, flat, no nested cards)
+        telemetry = ctk.CTkFrame(sidebar, corner_radius=0, fg_color="transparent", border_width=1, border_color=self.tokens["border"])
+        telemetry.pack(side="bottom", fill="x", padx=10, pady=16)
 
-        # Main workspace area.
-        right_panel = ctk.CTkFrame(workbench, corner_radius=0, fg_color=self.ui["bg"])
-        right_panel.grid(row=0, column=1, sticky="nsew")
-        right_panel.grid_columnconfigure(0, weight=1)
-        right_panel.grid_rowconfigure(2, weight=1)
+        ctk.CTkLabel(
+            telemetry, text="SYSTEM STATUS",
+            font=ctk.CTkFont(family="Consolas", size=9, weight="bold"),
+            text_color=self.tokens["text_muted"]
+        ).pack(anchor="w", padx=10, pady=(10, 4))
 
-        hero = ctk.CTkFrame(right_panel, fg_color="transparent")
-        hero.grid(row=0, column=0, sticky="ew", padx=24, pady=(17, 14))
-        ctk.CTkLabel(hero, text="What would you like to save?",
-                     font=ctk.CTkFont(size=24, weight="bold"), text_color=self.ui["text"]).pack(anchor="w")
-        ctk.CTkLabel(hero, text="Paste a video or playlist link, choose a format, and you're set.",
-                     font=ctk.CTkFont(size=12), text_color=self.ui["muted"]).pack(anchor="w", pady=(4, 0))
+        self.lbl_free_space = ctk.CTkLabel(telemetry, text="FREE: --", font=ctk.CTkFont(family="Consolas", size=10), text_color=self.tokens["text_primary"], anchor="w")
+        self.lbl_free_space.pack(fill="x", padx=10, pady=1)
 
-        # The main action card keeps the key decisions in a single, clear sequence.
-        card = ctk.CTkFrame(right_panel, corner_radius=16, fg_color=self.ui["panel"],
-                            border_width=1, border_color=self.ui["border"])
-        card.grid(row=1, column=0, sticky="ew", padx=24, pady=(0, 12))
-        ctk.CTkLabel(card, text="01  /  SOURCE LINK", font=ctk.CTkFont(size=10, weight="bold"),
-                     text_color=self.ui["muted"]).pack(anchor="w", padx=18, pady=(16, 7))
+        self.lbl_drive = ctk.CTkLabel(telemetry, text="DRIVE: --", font=ctk.CTkFont(family="Consolas", size=10), text_color=self.tokens["text_muted"], anchor="w")
+        self.lbl_drive.pack(fill="x", padx=10, pady=1)
 
-        url_row = ctk.CTkFrame(card, fg_color="transparent")
-        url_row.pack(fill="x", padx=18, pady=(0, 14))
+        self.lbl_ffmpeg_status = ctk.CTkLabel(telemetry, text="ENCODER: Ready", font=ctk.CTkFont(family="Consolas", size=10), text_color=self.tokens["emerald"], anchor="w")
+        self.lbl_ffmpeg_status.pack(fill="x", padx=10, pady=(1, 10))
+
+        # ---------------- MAIN CONTENT VIEWPORT ----------------
+        main_viewport = ctk.CTkFrame(workbench, corner_radius=0, fg_color=self.tokens["bg"])
+        main_viewport.grid(row=0, column=1, sticky="nsew")
+        main_viewport.grid_columnconfigure(0, weight=1)
+        main_viewport.grid_rowconfigure(0, weight=0) # Controls section
+        main_viewport.grid_rowconfigure(1, weight=1) # Activity & Terminal section
+
+        # --- UPPER CONTROLS SECTION ---
+        controls_panel = ctk.CTkFrame(main_viewport, corner_radius=0, fg_color=self.tokens["bg"])
+        controls_panel.grid(row=0, column=0, sticky="ew", padx=24, pady=(18, 12))
+        controls_panel.grid_columnconfigure(0, weight=1)
+
+        # 1. URL Input Block
+        ctk.CTkLabel(
+            controls_panel, text="02 / SOURCE LINK",
+            font=ctk.CTkFont(family="Consolas", size=10, weight="bold"),
+            text_color=self.tokens["text_muted"]
+        ).pack(anchor="w", pady=(0, 6))
+
+        url_row = ctk.CTkFrame(controls_panel, fg_color="transparent")
+        url_row.pack(fill="x", pady=(0, 10))
+
         self.entry_url = ctk.CTkEntry(
-            url_row, placeholder_text="Paste a YouTube video or playlist URL…", height=42,
-            corner_radius=10, border_width=1, border_color=self.ui["border"],
-            fg_color="#0B1220", text_color=self.ui["text"],
-            placeholder_text_color="#64748B", font=ctk.CTkFont(size=12)
+            url_row, placeholder_text="Paste YouTube video or playlist URL...",
+            height=38, corner_radius=3,
+            border_width=1, border_color=self.tokens["border"],
+            fg_color=self.tokens["surface"], text_color=self.tokens["text_primary"],
+            placeholder_text_color="#52525B", font=ctk.CTkFont(size=12)
         )
-        self.entry_url.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        self.entry_url.pack(side="left", fill="x", expand=True, padx=(0, 6))
         self.entry_url.bind("<Return>", lambda _event: self.trigger_analyze())
+
         ctk.CTkButton(
-            url_row, text="Paste", width=68, height=42, corner_radius=10,
-            font=ctk.CTkFont(size=11, weight="bold"), fg_color=self.ui["panel_alt"],
-            hover_color="#26334B", text_color=self.ui["text"], command=self.paste_from_clipboard
-        ).pack(side="left", padx=(0, 8))
+            url_row, text="PASTE", width=64, height=38, corner_radius=3,
+            font=ctk.CTkFont(family="Consolas", size=11, weight="bold"),
+            fg_color=self.tokens["surface_elevated"], hover_color=self.tokens["border_strong"],
+            text_color=self.tokens["text_primary"], command=self.paste_from_clipboard
+        ).pack(side="left", padx=(0, 6))
+
         self.btn_analyze = ctk.CTkButton(
-            url_row, text="Inspect link", width=104, height=42, corner_radius=10,
-            font=ctk.CTkFont(size=11, weight="bold"), fg_color=self.ui["accent"],
-            hover_color=self.ui["accent_hover"], text_color="#FFFFFF", command=self.trigger_analyze
+            url_row, text="INSPECT", width=86, height=38, corner_radius=3,
+            font=ctk.CTkFont(family="Consolas", size=11, weight="bold"),
+            fg_color=self.tokens["surface_elevated"], hover_color=self.tokens["border_strong"],
+            border_width=1, border_color=self.tokens["border_strong"],
+            text_color=self.tokens["text_primary"], command=self.trigger_analyze
         )
         self.btn_analyze.pack(side="left")
 
-        # Preview is only shown after successful inspection.
-        self.frame_analysis = ctk.CTkFrame(card, corner_radius=11, fg_color="#0E1D2A",
-                                            border_width=1, border_color="#1E4A45")
-        preview_inner = ctk.CTkFrame(self.frame_analysis, fg_color="transparent")
-        preview_inner.pack(fill="x", padx=12, pady=10)
-        ctk.CTkLabel(preview_inner, text="LINK DETAILS", font=ctk.CTkFont(size=9, weight="bold"),
-                     text_color=self.ui["green"]).pack(anchor="w", pady=(0, 3))
-        self.lbl_an_title = ctk.CTkLabel(preview_inner, text="", font=ctk.CTkFont(size=12, weight="bold"),
-                                         text_color=self.ui["text"], anchor="w", justify="left", wraplength=650)
-        self.lbl_an_title.pack(fill="x", anchor="w")
-        self.lbl_an_meta = ctk.CTkLabel(preview_inner, text="", font=ctk.CTkFont(size=10),
-                                        text_color="#A7F3D0", anchor="w", justify="left", wraplength=650)
-        self.lbl_an_meta.pack(fill="x", anchor="w", pady=(3, 0))
+        # Telemetry Banner (Revealed only when link is inspected)
+        self.frame_analysis = ctk.CTkFrame(
+            controls_panel, corner_radius=3, fg_color=self.tokens["surface"],
+            border_width=1, border_color=self.tokens["border_strong"]
+        )
+        self.lbl_an_title = ctk.CTkLabel(
+            self.frame_analysis, text="", font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=self.tokens["text_primary"], anchor="w", justify="left", wraplength=720
+        )
+        self.lbl_an_title.pack(fill="x", padx=12, pady=(8, 2))
+        self.lbl_an_meta = ctk.CTkLabel(
+            self.frame_analysis, text="", font=ctk.CTkFont(family="Consolas", size=11),
+            text_color=self.tokens["cyan"], anchor="w", justify="left", wraplength=720
+        )
+        self.lbl_an_meta.pack(fill="x", padx=12, pady=(0, 8))
         self.frame_analysis.pack_forget()
 
-        self.lbl_output_section = ctk.CTkLabel(
-            card, text="02  /  OUTPUT FORMAT", font=ctk.CTkFont(size=10, weight="bold"),
-            text_color=self.ui["muted"]
-        )
-        self.lbl_output_section.pack(anchor="w", padx=18, pady=(1, 7))
+        # 2. Output Specification Block
+        ctk.CTkLabel(
+            controls_panel, text="03 / OUTPUT SPECIFICATION",
+            font=ctk.CTkFont(family="Consolas", size=10, weight="bold"),
+            text_color=self.tokens["text_muted"]
+        ).pack(anchor="w", pady=(4, 6))
+
         self.format_options_map = {
-            "MP3 · USB / Speaker (128 kbps)": "mp3_speaker",
-            "MP3 · Maximum quality (320 kbps)": "mp3_320",
-            "MP3 · High quality (192 kbps)": "mp3_192",
-            "M4A · Original audio stream": "m4a",
-            "MP4 · 1080p Full HD": "video_1080",
-            "MP4 · 720p HD": "video_720",
-            "MP4 · Best available quality": "video_best",
-            "MP4 · 480p": "video_480",
+            "MP3 · Old Speaker / USB (128 kbps CBR, 44.1kHz, ID3v2.3)": "mp3_speaker",
+            "MP3 · Maximum Quality (320 kbps)": "mp3_320",
+            "MP3 · High Quality (192 kbps)": "mp3_192",
+            "M4A · Original AAC Audio Stream": "m4a",
+            "MP4 Video · 1080p Full HD": "video_1080",
+            "MP4 Video · 720p HD": "video_720",
+            "MP4 Video · Best Available Quality": "video_best",
+            "MP4 Video · 480p": "video_480"
         }
+
         self.combo_format = ctk.CTkComboBox(
-            card, values=list(self.format_options_map.keys()), height=40, corner_radius=10,
-            border_width=1, border_color=self.ui["border"], fg_color="#0B1220",
-            button_color=self.ui["panel_alt"], button_hover_color="#26334B",
-            dropdown_fg_color=self.ui["panel"], dropdown_hover_color=self.ui["panel_alt"],
-            text_color=self.ui["text"], font=ctk.CTkFont(size=12),
+            controls_panel, values=list(self.format_options_map.keys()),
+            height=38, corner_radius=3,
+            border_width=1, border_color=self.tokens["border"],
+            fg_color=self.tokens["surface"],
+            button_color=self.tokens["surface_elevated"], button_hover_color=self.tokens["border_strong"],
+            dropdown_fg_color=self.tokens["surface"], dropdown_hover_color=self.tokens["surface_elevated"],
+            text_color=self.tokens["text_primary"], font=ctk.CTkFont(size=12),
             dropdown_font=ctk.CTkFont(size=11), command=self.on_format_changed
         )
-        self.combo_format.pack(fill="x", padx=18)
-        self.combo_format.set("MP3 · USB / Speaker (128 kbps)")
+        self.combo_format.pack(fill="x", pady=(0, 4))
+        self.combo_format.set("MP3 · Old Speaker / USB (128 kbps CBR, 44.1kHz, ID3v2.3)")
+
         self.lbl_format_hint = ctk.CTkLabel(
-            card, text="Made for older car stereos, USB speakers, and MP3 players.",
-            font=ctk.CTkFont(size=10), text_color=self.ui["muted"], anchor="w"
+            controls_panel, text="[SPEC] 128k Constant Bitrate · 44.1kHz Stereo · Stripped Artwork · FAT32 Clean Filenames",
+            font=ctk.CTkFont(family="Consolas", size=10), text_color=self.tokens["text_muted"], anchor="w"
         )
-        self.lbl_format_hint.pack(fill="x", padx=20, pady=(5, 12))
+        self.lbl_format_hint.pack(fill="x", pady=(0, 10))
 
-        # Save location + optional playlist cap.
-        opts_grid = ctk.CTkFrame(card, fg_color="transparent")
-        opts_grid.pack(fill="x", padx=18, pady=(0, 12))
-        opts_grid.grid_columnconfigure(0, weight=3)
-        opts_grid.grid_columnconfigure(1, weight=1)
+        # 3. Parameters Row (Destination & Limits)
+        params_row = ctk.CTkFrame(controls_panel, fg_color="transparent")
+        params_row.pack(fill="x", pady=(0, 10))
+        params_row.grid_columnconfigure(0, weight=3)
+        params_row.grid_columnconfigure(1, weight=1)
 
-        ctk.CTkLabel(opts_grid, text="SAVE TO", font=ctk.CTkFont(size=9, weight="bold"),
-                     text_color=self.ui["muted"]).grid(row=0, column=0, sticky="w", pady=(0, 5))
-        ctk.CTkLabel(opts_grid, text="ITEM LIMIT", font=ctk.CTkFont(size=9, weight="bold"),
-                     text_color=self.ui["muted"]).grid(row=0, column=1, sticky="w", padx=(10, 0), pady=(0, 5))
+        ctk.CTkLabel(params_row, text="SAVE PATH", font=ctk.CTkFont(family="Consolas", size=9, weight="bold"), text_color=self.tokens["text_muted"]).grid(row=0, column=0, sticky="w", pady=(0, 4))
+        ctk.CTkLabel(params_row, text="ITEM LIMIT", font=ctk.CTkFont(family="Consolas", size=9, weight="bold"), text_color=self.tokens["text_muted"]).grid(row=0, column=1, sticky="w", padx=(10, 0), pady=(0, 4))
 
-        dest_row = ctk.CTkFrame(opts_grid, fg_color="transparent")
-        dest_row.grid(row=1, column=0, sticky="ew", padx=(0, 10))
+        dest_inner = ctk.CTkFrame(params_row, fg_color="transparent")
+        dest_inner.grid(row=1, column=0, sticky="ew", padx=(0, 10))
+
         self.entry_dest = ctk.CTkEntry(
-            dest_row, height=36, corner_radius=9, border_width=1,
-            border_color=self.ui["border"], fg_color="#0B1220", text_color=self.ui["text"],
-            font=ctk.CTkFont(size=10)
+            dest_inner, height=34, corner_radius=3,
+            border_width=1, border_color=self.tokens["border"],
+            fg_color=self.tokens["surface"], text_color=self.tokens["text_primary"],
+            font=ctk.CTkFont(family="Consolas", size=11)
         )
         self.entry_dest.pack(side="left", fill="x", expand=True, padx=(0, 6))
         self.entry_dest.insert(0, DEFAULT_SONGS)
         self.entry_dest.bind("<FocusOut>", lambda _event: (self.update_storage_info(), self.update_sidebar_selection()))
+
         ctk.CTkButton(
-            dest_row, text="Browse", width=68, height=36, corner_radius=9,
-            font=ctk.CTkFont(size=10, weight="bold"), fg_color=self.ui["panel_alt"],
-            hover_color="#26334B", text_color=self.ui["text"], command=self.browse_folder
+            dest_inner, text="BROWSE", width=72, height=34, corner_radius=3,
+            font=ctk.CTkFont(family="Consolas", size=10, weight="bold"),
+            fg_color=self.tokens["surface_elevated"], hover_color=self.tokens["border_strong"],
+            text_color=self.tokens["text_primary"], command=self.browse_folder
         ).pack(side="left")
 
         self.entry_limit = ctk.CTkEntry(
-            opts_grid, placeholder_text="All items", height=36, corner_radius=9,
-            border_width=1, border_color=self.ui["border"], fg_color="#0B1220",
-            text_color=self.ui["text"], placeholder_text_color="#64748B", font=ctk.CTkFont(size=11)
+            params_row, placeholder_text="All items", height=34, corner_radius=3,
+            border_width=1, border_color=self.tokens["border"],
+            fg_color=self.tokens["surface"], text_color=self.tokens["text_primary"],
+            placeholder_text_color="#52525B", font=ctk.CTkFont(family="Consolas", size=11)
         )
         self.entry_limit.grid(row=1, column=1, sticky="ew", padx=(10, 0))
 
+        # Checkbox: Skip duplicates
         self.var_ignore_dups = ctk.BooleanVar(value=True)
         self.chk_dups = ctk.CTkCheckBox(
-            card, text="Skip files that already exist in the destination folder",
-            variable=self.var_ignore_dups, font=ctk.CTkFont(size=11),
-            text_color="#CBD5E1", fg_color=self.ui["accent"], hover_color=self.ui["accent_hover"],
-            border_color="#64748B", checkmark_color="#FFFFFF"
+            controls_panel, text="Skip files already present in destination folder",
+            variable=self.var_ignore_dups, corner_radius=2,
+            font=ctk.CTkFont(size=11), text_color=self.tokens["text_secondary"],
+            fg_color=self.tokens["cta_bg"], hover_color=self.tokens["cta_hover"],
+            checkmark_color=self.tokens["cta_fg"], border_color=self.tokens["border_strong"]
         )
-        self.chk_dups.pack(anchor="w", padx=18, pady=(0, 13))
+        self.chk_dups.pack(anchor="w", pady=(0, 14))
 
-        action_row = ctk.CTkFrame(card, fg_color="transparent")
-        action_row.pack(fill="x", padx=18, pady=(0, 16))
+        # 4. Action Row (ArtCraft Signature Invert CTA Button)
+        action_row = ctk.CTkFrame(controls_panel, fg_color="transparent")
+        action_row.pack(fill="x", pady=(0, 4))
+
         self.btn_download = ctk.CTkButton(
-            action_row, text="↓   Start download", height=43, corner_radius=11,
-            font=ctk.CTkFont(size=13, weight="bold"), fg_color=self.ui["accent"],
-            hover_color=self.ui["accent_hover"], text_color="#FFFFFF", command=self.start_download
+            action_row, text="START DOWNLOAD", height=42, corner_radius=3,
+            font=ctk.CTkFont(family="Consolas", size=12, weight="bold"),
+            fg_color=self.tokens["cta_bg"], hover_color=self.tokens["cta_hover"],
+            text_color=self.tokens["cta_fg"], command=self.start_download
         )
         self.btn_download.pack(side="left", fill="x", expand=True, padx=(0, 8))
+
         self.btn_stop = ctk.CTkButton(
-            action_row, text="Stop", width=94, height=43, corner_radius=11,
-            font=ctk.CTkFont(size=11, weight="bold"), fg_color="#3A1D2A",
-            hover_color="#582438", text_color="#FDA4AF", state="disabled", command=self.stop_download
+            action_row, text="STOP", width=84, height=42, corner_radius=3,
+            font=ctk.CTkFont(family="Consolas", size=11, weight="bold"),
+            fg_color="#271418", hover_color="#3B1C22",
+            border_width=1, border_color="#4C1D24",
+            text_color=self.tokens["rose"], state="disabled", command=self.stop_download
         )
         self.btn_stop.pack(side="left")
 
-        # Progress and logs are grouped into one quieter activity panel.
-        term_frame = ctk.CTkFrame(right_panel, corner_radius=16, fg_color=self.ui["panel"],
-                                  border_width=1, border_color=self.ui["border"])
-        term_frame.grid(row=2, column=0, sticky="nsew", padx=24, pady=(0, 18))
+        # --- LOWER ACTIVITY & TELEMETRY SECTION (Hairline Separator) ---
+        term_frame = ctk.CTkFrame(main_viewport, corner_radius=0, fg_color=self.tokens["bg"], border_width=1, border_color=self.tokens["border"])
+        term_frame.grid(row=1, column=0, sticky="nsew", padx=24, pady=(0, 16))
         term_frame.grid_columnconfigure(0, weight=1)
-        term_frame.grid_rowconfigure(3, weight=1)
+        term_frame.grid_rowconfigure(2, weight=1)
 
-        prog_top_row = ctk.CTkFrame(term_frame, fg_color="transparent")
-        prog_top_row.grid(row=0, column=0, sticky="ew", padx=15, pady=(12, 4))
-        prog_top_row.grid_columnconfigure(0, weight=1)
+        # Progress Status Line
+        prog_header = ctk.CTkFrame(term_frame, fg_color=self.tokens["surface"], height=32, corner_radius=0)
+        prog_header.grid(row=0, column=0, sticky="ew")
+        prog_header.grid_columnconfigure(0, weight=1)
+
         self.lbl_progress_status = ctk.CTkLabel(
-            prog_top_row, text="Ready for your first download", font=ctk.CTkFont(size=11, weight="bold"),
-            text_color=self.ui["text"], anchor="w"
+            prog_header, text="Ready to download",
+            font=ctk.CTkFont(family="Consolas", size=11, weight="bold"),
+            text_color=self.tokens["text_primary"]
         )
-        self.lbl_progress_status.grid(row=0, column=0, sticky="w")
-        self.lbl_progress_meta = ctk.CTkLabel(
-            prog_top_row, text="0%", font=ctk.CTkFont(size=10, weight="bold"),
-            text_color=self.ui["green"], anchor="e"
-        )
-        self.lbl_progress_meta.grid(row=0, column=1, sticky="e", padx=(12, 0))
+        self.lbl_progress_status.grid(row=0, column=0, sticky="w", padx=12, pady=6)
 
-        self.progress_bar = ctk.CTkProgressBar(
-            term_frame, height=7, corner_radius=4, progress_color=self.ui["accent"],
-            fg_color="#253047"
+        self.lbl_progress_meta = ctk.CTkLabel(
+            prog_header, text="0%",
+            font=ctk.CTkFont(family="Consolas", size=11, weight="bold"),
+            text_color=self.tokens["emerald"]
         )
-        self.progress_bar.grid(row=1, column=0, sticky="ew", padx=15, pady=(0, 10))
+        self.lbl_progress_meta.grid(row=0, column=1, sticky="e", padx=12, pady=6)
+
+        # Clean 3px progress bar
+        self.progress_bar = ctk.CTkProgressBar(
+            term_frame, height=3, corner_radius=0,
+            progress_color=self.tokens["emerald"], fg_color=self.tokens["border"]
+        )
+        self.progress_bar.grid(row=1, column=0, sticky="ew")
         self.progress_bar.set(0)
 
-        log_header = ctk.CTkFrame(term_frame, fg_color="transparent")
-        log_header.grid(row=2, column=0, sticky="ew", padx=15, pady=(0, 5))
-        log_header.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(log_header, text="ACTIVITY", font=ctk.CTkFont(size=9, weight="bold"),
-                     text_color=self.ui["muted"]).grid(row=0, column=0, sticky="w")
+        # Monospace Telemetry Screen
+        term_body = ctk.CTkFrame(term_frame, fg_color=self.tokens["bg"], corner_radius=0)
+        term_body.grid(row=2, column=0, sticky="nsew")
+        term_body.grid_columnconfigure(0, weight=1)
+        term_body.grid_rowconfigure(1, weight=1)
+
+        console_toolbar = ctk.CTkFrame(term_body, fg_color="transparent", height=24)
+        console_toolbar.grid(row=0, column=0, sticky="ew", padx=12, pady=(6, 2))
+        console_toolbar.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            console_toolbar, text="ACTIVITY LOG",
+            font=ctk.CTkFont(family="Consolas", size=9, weight="bold"),
+            text_color=self.tokens["text_muted"]
+        ).grid(row=0, column=0, sticky="w")
+
         ctk.CTkButton(
-            log_header, text="Clear", width=52, height=23, corner_radius=7,
-            font=ctk.CTkFont(size=9), fg_color="transparent", hover_color=self.ui["panel_alt"],
-            text_color=self.ui["muted"], command=self.clear_logs
+            console_toolbar, text="[CLEAR]", width=48, height=20, corner_radius=2,
+            font=ctk.CTkFont(family="Consolas", size=9),
+            fg_color="transparent", hover_color=self.tokens["surface_elevated"],
+            text_color=self.tokens["text_muted"], command=self.clear_logs
         ).grid(row=0, column=1, sticky="e")
+
         self.txt_terminal = ctk.CTkTextbox(
-            term_frame, corner_radius=9, fg_color="#0A101D", text_color="#C4D0E0",
-            border_width=1, border_color="#202B40", font=ctk.CTkFont(family="Consolas", size=10),
+            term_body, corner_radius=0, fg_color="#070708", text_color="#D4D4D8",
+            border_width=1, border_color=self.tokens["border"],
+            font=ctk.CTkFont(family="Consolas", size=10),
             activate_scrollbars=True
         )
-        self.txt_terminal.grid(row=3, column=0, sticky="nsew", padx=15, pady=(0, 13))
+        self.txt_terminal.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 10))
 
-        self.append_log("[SYSTEM] YouTube Downloader is ready.")
-        self.append_log("[TIP] Paste a YouTube link, inspect it, then start your download.")
-        self.update_sidebar_selection()
+        self.append_log("[SYS] YouTube Downloader initialized.")
+        self.append_log("[SYS] Paste a YouTube link above, choose format, and click START DOWNLOAD.")
 
     # ---------------- UI Event Handlers ----------------
 
@@ -422,58 +490,42 @@ class YouTubeDownloaderApp(ctk.CTk):
         current_dest = self.entry_dest.get().strip()
 
         if selected_code.startswith("video_"):
-            if current_dest.lower().endswith(("songs", "music")):
+            if current_dest.lower().endswith("songs"):
                 self.set_destination(DEFAULT_VIDEOS)
-            hints = {
-                "video_1080": "Full HD video. FFmpeg merges video and audio into MP4.",
-                "video_720": "HD video. A good balance of quality and file size.",
-                "video_480": "Smaller MP4 files for slower connections or limited storage.",
-                "video_best": "Choose the best available quality; final resolution depends on the source.",
-            }
-            self.lbl_format_hint.configure(text=hints.get(selected_code, "Downloads video as MP4."))
+            self.lbl_format_hint.configure(
+                text=f"[SPEC] {selected_code.replace('video_', '').upper()} MP4 Video · Audio Muxed · FFmpeg Encoded"
+            )
         else:
-            if current_dest.lower().endswith(("videos", "video")):
+            if current_dest.lower().endswith("videos"):
                 self.set_destination(DEFAULT_SONGS)
             if selected_code == "mp3_speaker":
-                hint = "Made for older car stereos, USB speakers, and MP3 players."
-            elif selected_code == "mp3_320":
-                hint = "Higher-bitrate MP3 for maximum everyday audio quality."
-            elif selected_code == "mp3_192":
-                hint = "A smaller MP3 file with good audio quality."
+                self.lbl_format_hint.configure(
+                    text="[SPEC] 128k Constant Bitrate · 44.1kHz Stereo · Stripped Artwork · FAT32 Clean Filenames"
+                )
+            elif selected_code == "m4a":
+                self.lbl_format_hint.configure(text="[SPEC] Original AAC Audio Stream · Direct Demux without Re-encoding")
             else:
-                hint = "Keeps the source audio stream in M4A where available."
-            self.lbl_format_hint.configure(text=hint)
+                self.lbl_format_hint.configure(text=f"[SPEC] MP3 High Fidelity · {selected_code.replace('mp3_', '')} kbps CBR · 44.1kHz Stereo")
 
         if self.current_analysis:
             self.update_analysis_meta(self.current_analysis)
-        self.update_sidebar_selection()
 
     def set_destination(self, path):
         self.entry_dest.delete(0, "end")
         self.entry_dest.insert(0, path)
         self.update_storage_info()
         self.update_sidebar_selection()
-        self.append_log(f"[INFO] Destination folder set to: {path}")
+        self.append_log(f"[DIR] Destination: {path}")
 
     def update_sidebar_selection(self):
-        """Highlight the quick destination that matches the current output path."""
-        if not hasattr(self, "entry_dest"):
-            return
-        try:
-            current = os.path.normcase(os.path.abspath(self.entry_dest.get().strip()))
-            presets = [
-                (self.btn_dest_songs, DEFAULT_SONGS),
-                (self.btn_dest_videos, DEFAULT_VIDEOS),
-                (self.btn_dest_root, DEFAULT_ROOT),
-            ]
-            for button, path in presets:
-                active = current == os.path.normcase(os.path.abspath(path))
-                button.configure(
-                    fg_color=self.ui["panel_alt"] if active else "transparent",
-                    text_color=self.ui["text"] if active else "#CBD5E1"
-                )
-        except Exception:
-            pass
+        curr = os.path.normpath(self.entry_dest.get().strip()).lower()
+        songs_norm = os.path.normpath(DEFAULT_SONGS).lower()
+        videos_norm = os.path.normpath(DEFAULT_VIDEOS).lower()
+        root_norm = os.path.normpath(DEFAULT_ROOT).lower()
+
+        self.btn_dest_songs.configure(fg_color=self.tokens["surface_elevated"] if curr == songs_norm else "transparent")
+        self.btn_dest_videos.configure(fg_color=self.tokens["surface_elevated"] if curr == videos_norm else "transparent")
+        self.btn_dest_root.configure(fg_color=self.tokens["surface_elevated"] if curr == root_norm else "transparent")
 
     def browse_folder(self):
         curr = self.entry_dest.get().strip() or DEFAULT_ROOT
@@ -484,21 +536,18 @@ class YouTubeDownloaderApp(ctk.CTk):
     def update_storage_info(self):
         try:
             target_path = self.entry_dest.get().strip() or DEFAULT_ROOT
-            absolute_path = os.path.abspath(target_path)
-            drive = os.path.splitdrive(absolute_path)[0]
-            usage_path = f"{drive}{os.sep}" if drive else (target_path or os.getcwd())
-            total, used, free = shutil.disk_usage(usage_path)
-            free_gb = free / (1024 ** 3)
-            self.lbl_free_space.configure(text=f"Free space: {free_gb:.1f} GB")
-            self.lbl_drive.configure(text=f"Drive: {drive or os.path.split(absolute_path)[0] or os.sep}")
+            drive = os.path.splitdrive(target_path)[0] or "C:"
+            total, used, free = shutil.disk_usage(drive)
+            free_gb = free / (1024**3)
+            self.lbl_free_space.configure(text=f"FREE: {free_gb:.1f} GB")
+            self.lbl_drive.configure(text=f"DRIVE: {drive}")
         except Exception:
-            self.lbl_free_space.configure(text="Free space: unavailable")
-            self.lbl_drive.configure(text="Drive: unavailable")
+            pass
 
         if FFMPEG_EXE and os.path.exists(FFMPEG_EXE):
-            self.lbl_ffmpeg_status.configure(text="FFmpeg: Ready", text_color=self.ui["green"])
+            self.lbl_ffmpeg_status.configure(text="ENCODER: FFmpeg Ready", text_color=self.tokens["emerald"])
         else:
-            self.lbl_ffmpeg_status.configure(text="FFmpeg: Not found", text_color=self.ui["red"])
+            self.lbl_ffmpeg_status.configure(text="ENCODER: Not Found", text_color=self.tokens["rose"])
 
     def append_log(self, msg):
         self.log_queue.put(msg)
@@ -509,11 +558,11 @@ class YouTubeDownloaderApp(ctk.CTk):
             t_str = time.strftime("%H:%M:%S")
             self.txt_terminal.insert("end", f"[{t_str}] {msg}\n")
             self.txt_terminal.see("end")
-        self.after(100, self.poll_log_queue)
+        self.after(80, self.poll_log_queue)
 
     def clear_logs(self):
         self.txt_terminal.delete("1.0", "end")
-        self.append_log("[SYSTEM] Console cleared. Ready.")
+        self.append_log("[SYS] Activity log cleared.")
 
     # ---------------- Link Analysis ----------------
 
@@ -523,9 +572,9 @@ class YouTubeDownloaderApp(ctk.CTk):
             messagebox.showwarning("Notice", "Please paste a YouTube link first.")
             return
 
-        self.btn_analyze.configure(state="disabled", text="Inspecting…")
-        self.lbl_header_status.configure(text="● Inspecting", text_color=self.ui["accent"])
-        self.append_log(f"[ANALYSIS] Inspecting link: {url}")
+        self.btn_analyze.configure(state="disabled", text="CHECKING")
+        self.lbl_header_status.configure(text="● ANALYZING", text_color=self.tokens["cyan"])
+        self.append_log(f"[GET] Inspecting link: {url}")
 
         def worker():
             try:
@@ -541,15 +590,12 @@ class YouTubeDownloaderApp(ctk.CTk):
         ydl_opts = {'quiet': True, 'extract_flat': True}
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
-            raw_entries = info.get('entries')
-            is_playlist = raw_entries is not None
-            entries = list(raw_entries) if is_playlist else [info]
+            is_playlist = 'entries' in info
+            entries = list(info.get('entries', [])) if is_playlist else [info]
 
             valid = []
             total_dur = 0
             for e in entries:
-                if not isinstance(e, dict):
-                    continue
                 t = e.get('title')
                 dur = e.get('duration') or 0
                 if t and not t.startswith('['):
@@ -569,48 +615,43 @@ class YouTubeDownloaderApp(ctk.CTk):
 
     def on_analysis_success(self, res):
         self.current_analysis = res
-        self.btn_analyze.configure(state="normal", text="Inspect link")
-        self.lbl_header_status.configure(text="● Ready", text_color=self.ui["green"])
-        self.frame_analysis.pack(fill="x", padx=18, pady=(0, 14), before=self.lbl_output_section)
+        self.btn_analyze.configure(state="normal", text="INSPECT")
+        self.lbl_header_status.configure(text="● READY", text_color=self.tokens["emerald"])
+        self.frame_analysis.pack(fill="x", pady=(0, 10))
         self.update_analysis_meta(res)
-        self.append_log(f"[SUCCESS] Analyzed: '{res['title']}' ({res['track_count']} items, {res['duration_str']})")
+        self.append_log(f"[OK] Link verified: '{res['title']}' ({res['track_count']} items, {res['duration_str']})")
 
     def update_analysis_meta(self, res):
         chosen_format = self.format_options_map.get(self.combo_format.get(), "mp3_speaker")
         dur = res["total_duration"]
 
-        # These are intentionally presented as rough estimates, not exact file sizes.
         if chosen_format.startswith("video_"):
-            bitrate_bps = {
-                "video_480": 900_000,
-                "video_720": 2_500_000,
-                "video_1080": 4_500_000,
-                "video_best": 5_000_000,
-            }.get(chosen_format, 2_500_000)
-            suffix = "MP4 video"
+            if chosen_format in ("video_720", "video_480"):
+                mb = (320000 * dur) / (1024 * 1024)
+            else:
+                mb = (580000 * dur) / (1024 * 1024)
+            est_str = f"{mb/1024:.2f} GB" if mb >= 1024 else f"{mb:.1f} MB"
+            label = f"{res['track_count']} Items  ·  {res['duration_str']}  ·  Estimated Size: {est_str} (MP4)"
         elif chosen_format == "mp3_320":
-            bitrate_bps, suffix = 320000, "MP3 audio"
+            mb = (40000 * dur) / (1024 * 1024)
+            est_str = f"{mb/1024:.2f} GB" if mb >= 1024 else f"{mb:.1f} MB"
+            label = f"{res['track_count']} Items  ·  {res['duration_str']}  ·  Estimated Size: {est_str} (320k MP3)"
         elif chosen_format == "mp3_192":
-            bitrate_bps, suffix = 192000, "MP3 audio"
-        elif chosen_format == "m4a":
-            bitrate_bps, suffix = 160000, "M4A audio"
+            mb = (24000 * dur) / (1024 * 1024)
+            est_str = f"{mb/1024:.2f} GB" if mb >= 1024 else f"{mb:.1f} MB"
+            label = f"{res['track_count']} Items  ·  {res['duration_str']}  ·  Estimated Size: {est_str} (192k MP3)"
         else:
-            bitrate_bps, suffix = 128000, "MP3 audio"
+            mb = (16000 * dur) / (1024 * 1024)
+            est_str = f"{mb/1024:.2f} GB" if mb >= 1024 else f"{mb:.1f} MB"
+            label = f"{res['track_count']} Items  ·  {res['duration_str']}  ·  Estimated Size: {est_str} (128k CBR MP3)"
 
-        mb = (bitrate_bps * dur) / (8 * 1024 * 1024)
-        est_str = f"{mb / 1024:.2f} GB" if mb >= 1024 else f"{mb:.1f} MB"
-        kind = "Playlist" if res.get("is_playlist") else "Video"
-        self.lbl_an_title.configure(text=res["title"])
-        self.lbl_an_meta.configure(
-            text=f"{kind}  ·  {res['track_count']} item(s)  ·  {res['duration_str']}  ·  Approx. {est_str} ({suffix})"
-        )
+        self.lbl_an_title.configure(text=res['title'])
+        self.lbl_an_meta.configure(text=label)
 
     def on_analysis_error(self, err):
-        self.btn_analyze.configure(state="normal", text="Inspect link")
-        self.lbl_header_status.configure(text="● Link error", text_color=self.ui["red"])
-        self.current_analysis = None
-        self.frame_analysis.pack_forget()
-        self.append_log(f"[ERROR] Failed to inspect link: {err}")
+        self.btn_analyze.configure(state="normal", text="INSPECT")
+        self.lbl_header_status.configure(text="● ERROR", text_color=self.tokens["rose"])
+        self.append_log(f"[ERR] Inspection failed: {err}")
 
     # ---------------- Download Engine ----------------
 
@@ -637,9 +678,9 @@ class YouTubeDownloaderApp(ctk.CTk):
         self.stop_event.clear()
         self.btn_download.configure(state="disabled")
         self.btn_stop.configure(state="normal")
-        self.lbl_header_status.configure(text="● Downloading", text_color=self.ui["accent"])
+        self.lbl_header_status.configure(text="● DOWNLOADING", text_color=self.tokens["amber"])
         self.progress_bar.set(0)
-        self.lbl_progress_status.configure(text="Preparing download queue…")
+        self.lbl_progress_status.configure(text="Initializing download queue...")
         self.lbl_progress_meta.configure(text="0%")
 
         params = {
@@ -656,8 +697,8 @@ class YouTubeDownloaderApp(ctk.CTk):
     def stop_download(self):
         if self.is_downloading:
             self.stop_event.set()
-            self.append_log("[USER] Requesting download stop...")
-            self.lbl_progress_status.configure(text="Stopping download…")
+            self.append_log("[USER] Download cancellation requested.")
+            self.lbl_progress_status.configure(text="Stopping...")
 
     def run_download_worker(self, params):
         url = params["url"]
@@ -666,44 +707,33 @@ class YouTubeDownloaderApp(ctk.CTk):
         ignore_dups = params["ignore_dups"]
         max_tracks = params["max_tracks"]
 
-        try:
-            os.makedirs(dest_dir, exist_ok=True)
-        except Exception as e:
-            self.append_log(f"[ERROR] Cannot create destination folder: {e}")
-            self.after(0, lambda: self.finish_download("error", "Cannot create the destination folder."))
-            return
+        os.makedirs(dest_dir, exist_ok=True)
 
         is_video = download_type.startswith("video_")
         is_speaker = (download_type == "mp3_speaker")
         video_quality = download_type.replace("video_", "") if is_video else "1080"
         bitrate = "320" if download_type == "mp3_320" else ("192" if download_type == "mp3_192" else "128")
 
-        self.append_log(f"[INFO] Target Folder: {dest_dir}")
-        self.append_log(f"[INFO] Download Option: {download_type}")
+        self.append_log(f"[QUEUE] Target path: {dest_dir}")
+        self.append_log(f"[QUEUE] Format profile: {download_type}")
 
-        # Fetch entries
+        # Fetch playlist / video info
         ydl_opts = {'quiet': True, 'extract_flat': True}
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
         except Exception as e:
-            self.append_log(f"[ERROR] Failed to fetch playlist info: {e}")
-            self.after(0, lambda: self.finish_download("error", "Could not read the media link."))
+            self.append_log(f"[ERR] Failed to extract URL info: {e}")
+            self.after(0, self.finish_download)
             return
 
-        raw_entries = info.get('entries')
-        entries = list(raw_entries) if raw_entries is not None else [info]
+        entries = list(info.get('entries', [])) if 'entries' in info else [info]
 
-        # Scan existing files for duplicate check & index numbering.
-        try:
-            if is_video:
-                existing_files = [f for f in os.listdir(dest_dir) if f.lower().endswith(('.mp4', '.mkv', '.webm'))]
-            else:
-                existing_files = [f for f in os.listdir(dest_dir) if f.lower().endswith(('.mp3', '.m4a', '.opus'))]
-        except Exception as e:
-            self.append_log(f"[ERROR] Cannot inspect destination folder: {e}")
-            self.after(0, lambda: self.finish_download("error", "Cannot inspect the destination folder."))
-            return
+        # Scan existing files for duplicate check & index numbering
+        if is_video:
+            existing_files = [f for f in os.listdir(dest_dir) if f.lower().endswith(('.mp4', '.mkv', '.webm'))]
+        else:
+            existing_files = [f for f in os.listdir(dest_dir) if f.lower().endswith(('.mp3', '.m4a', '.opus'))]
 
         existing_keys = set()
         max_idx = 0
@@ -720,8 +750,6 @@ class YouTubeDownloaderApp(ctk.CTk):
         queue_items = []
         seen_keys = set()
         for idx, e in enumerate(entries, 1):
-            if not isinstance(e, dict):
-                continue
             vid = e.get('id')
             title = e.get('title')
             dur = e.get('duration') or 0
@@ -730,10 +758,10 @@ class YouTubeDownloaderApp(ctk.CTk):
             k = get_core_title_key(title)
             if ignore_dups:
                 if k in existing_keys:
-                    self.append_log(f"[SKIP] Existing in folder: {title}")
+                    self.append_log(f"[SKIP] Existing: {title}")
                     continue
                 if k in seen_keys:
-                    self.append_log(f"[SKIP] Duplicate in playlist: {title}")
+                    self.append_log(f"[SKIP] Duplicate in batch: {title}")
                     continue
             seen_keys.add(k)
             queue_items.append({'id': vid, 'title': title, 'duration': dur, 'key': k})
@@ -741,17 +769,17 @@ class YouTubeDownloaderApp(ctk.CTk):
                 break
 
         total_queue = len(queue_items)
-        self.append_log(f"[INFO] Ready to download {total_queue} items.")
+        self.append_log(f"[QUEUE] {total_queue} items queued for processing.")
 
         if total_queue == 0:
-            self.append_log("[INFO] No new items to download (all skipped or up-to-date).")
-            self.after(0, lambda: self.finish_download("idle", "Nothing new to download."))
+            self.append_log("[OK] All items are already downloaded and verified.")
+            self.after(0, self.finish_download)
             return
 
         current_idx = 0
         def progress_hook(d):
             if self.stop_event.is_set():
-                raise yt_dlp.utils.DownloadCancelled("Download stopped by user.")
+                raise yt_dlp.utils.DownloadCancelled("Download cancelled by user.")
             if d['status'] == 'downloading':
                 total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
                 downloaded = d.get('downloaded_bytes') or 0
@@ -763,17 +791,14 @@ class YouTubeDownloaderApp(ctk.CTk):
                     sub_pct = (downloaded / total) * 100
                     base_pct = ((current_idx - 1) / total_queue) * 100
                     total_pct = min(99.9, base_pct + (sub_pct / total_queue))
-                    self.after(0, lambda pct=total_pct, sp=speed_str, et=eta_str: self.update_progress_ui(pct, sp, et))
+                    self.after(0, lambda: self.update_progress_ui(total_pct, speed_str, eta_str))
 
         start_num = max_idx + 1
         downloaded_count = 0
-        failed_count = 0
-        was_stopped = False
 
         for i, item in enumerate(queue_items):
             if self.stop_event.is_set():
-                was_stopped = True
-                self.append_log("[WARN] Download stopped by user.")
+                self.append_log("[STOP] Process interrupted by user.")
                 break
 
             current_idx = i + 1
@@ -782,9 +807,9 @@ class YouTubeDownloaderApp(ctk.CTk):
             filename_base = f"{track_num:03d} - {cleaned}"
 
             self.after(0, lambda n=current_idx, t=total_queue, name=item['title']: self.lbl_progress_status.configure(
-                text=f"[{n}/{t}] Downloading: {name[:50]}"
+                text=f"[{n}/{t}] Processing: {name[:55]}"
             ))
-            self.append_log(f"[DOWNLOAD] [{current_idx}/{total_queue}] Starting: {item['title']}")
+            self.append_log(f"[GET] [{current_idx}/{total_queue}] {item['title']}")
 
             if is_video:
                 if video_quality == 'best':
@@ -832,29 +857,17 @@ class YouTubeDownloaderApp(ctk.CTk):
                 with yt_dlp.YoutubeDL(opts) as ydl:
                     ydl.download([f"https://www.youtube.com/watch?v={item['id']}"])
                 downloaded_count += 1
-                self.append_log(f"[SUCCESS] Saved: {filename_base}")
+                self.append_log(f"[OK] Saved: {filename_base}")
             except Exception as e:
                 if self.stop_event.is_set():
-                    was_stopped = True
                     break
-                failed_count += 1
-                self.append_log(f"[ERROR] Failed to download {item['title']}: {e}")
+                self.append_log(f"[ERR] Download error ({item['title']}): {e}")
 
-        if was_stopped or self.stop_event.is_set():
-            self.append_log(f"[STOPPED] Download stopped. Saved {downloaded_count} item(s) before stopping.")
-            self.after(0, lambda: self.finish_download("stopped", "Download stopped."))
-        elif failed_count and downloaded_count:
-            self.append_log(f"[PARTIAL] Saved {downloaded_count}; failed {failed_count} item(s).")
-            self.after(0, lambda: self.finish_download("partial", "Finished with some errors."))
-        elif failed_count:
-            self.append_log(f"[ERROR] Could not download any items ({failed_count} failed).")
-            self.after(0, lambda: self.finish_download("error", "Downloads failed. Check the activity log."))
-        else:
-            self.append_log(f"[COMPLETE] Finished. Downloaded {downloaded_count} item(s).")
-            self.after(0, lambda: self.finish_download("complete", f"Finished — {downloaded_count} item(s) saved."))
+        self.append_log(f"[DONE] Completed. Downloaded {downloaded_count} items.")
+        self.after(0, self.finish_download)
 
     def update_progress_ui(self, pct, speed, eta):
-        self.progress_bar.set(max(0.0, min(1.0, pct / 100.0)))
+        self.progress_bar.set(pct / 100.0)
         meta_str = f"{round(pct)}%"
         if speed:
             meta_str = f"{speed}  ·  {meta_str}"
@@ -862,35 +875,15 @@ class YouTubeDownloaderApp(ctk.CTk):
             meta_str = f"{meta_str}  ·  {eta}"
         self.lbl_progress_meta.configure(text=meta_str)
 
-    def finish_download(self, outcome="complete", message=None):
+    def finish_download(self):
         self.is_downloading = False
         self.btn_download.configure(state="normal")
         self.btn_stop.configure(state="disabled")
+        self.lbl_header_status.configure(text="● ENGINE READY", text_color=self.tokens["emerald"])
+        self.lbl_progress_status.configure(text="Ready to download")
+        self.progress_bar.set(1.0)
+        self.lbl_progress_meta.configure(text="100%")
         self.update_storage_info()
-
-        if outcome == "complete":
-            self.lbl_header_status.configure(text="● Complete", text_color=self.ui["green"])
-            self.lbl_progress_status.configure(text=message or "Download finished.")
-            self.progress_bar.set(1.0)
-            self.lbl_progress_meta.configure(text="100%")
-        elif outcome == "partial":
-            self.lbl_header_status.configure(text="● Partial", text_color=self.ui["amber"])
-            self.lbl_progress_status.configure(text=message or "Finished with some errors.")
-            self.progress_bar.set(1.0)
-            self.lbl_progress_meta.configure(text="Done · partial")
-        elif outcome == "stopped":
-            self.lbl_header_status.configure(text="● Stopped", text_color=self.ui["amber"])
-            self.lbl_progress_status.configure(text=message or "Download stopped.")
-            self.lbl_progress_meta.configure(text="Stopped")
-        elif outcome == "idle":
-            self.lbl_header_status.configure(text="● Ready", text_color=self.ui["green"])
-            self.lbl_progress_status.configure(text=message or "Nothing new to download.")
-            self.progress_bar.set(0)
-            self.lbl_progress_meta.configure(text="0%")
-        else:
-            self.lbl_header_status.configure(text="● Error", text_color=self.ui["red"])
-            self.lbl_progress_status.configure(text=message or "Download failed. Check the activity log.")
-            self.lbl_progress_meta.configure(text="Error")
 
     def on_closing(self):
         if self.is_downloading:
