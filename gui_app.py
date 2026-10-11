@@ -244,7 +244,7 @@ class YouTubeDownloaderApp(ctk.CTk):
             sidebar, text="▣  videos", anchor="w", height=34, corner_radius=4,
             font=ctk.CTkFont(family="Consolas", size=11),
             fg_color="transparent", hover_color=self.tokens["surface_elevated"],
-            border_width=0, border_color="transparent",
+            border_width=0, border_color=self.tokens["border"],
             text_color=self.tokens["text_secondary"],
             command=lambda: self.set_destination(DEFAULT_VIDEOS)
         )
@@ -254,7 +254,7 @@ class YouTubeDownloaderApp(ctk.CTk):
             sidebar, text="⌂  root folder", anchor="w", height=34, corner_radius=4,
             font=ctk.CTkFont(family="Consolas", size=11),
             fg_color="transparent", hover_color=self.tokens["surface_elevated"],
-            border_width=0, border_color="transparent",
+            border_width=0, border_color=self.tokens["border"],
             text_color=self.tokens["text_secondary"],
             command=lambda: self.set_destination(DEFAULT_ROOT)
         )
@@ -711,19 +711,19 @@ class YouTubeDownloaderApp(ctk.CTk):
         self.btn_dest_songs.configure(
             fg_color=self.tokens["surface_elevated"] if curr == songs_norm else "transparent",
             border_width=1 if curr == songs_norm else 0,
-            border_color=self.tokens["border_strong"] if curr == songs_norm else "transparent",
+            border_color=self.tokens["border_strong"] if curr == songs_norm else self.tokens["border"],
             text_color=self.tokens["text_primary"] if curr == songs_norm else self.tokens["text_secondary"]
         )
         self.btn_dest_videos.configure(
             fg_color=self.tokens["surface_elevated"] if curr == videos_norm else "transparent",
             border_width=1 if curr == videos_norm else 0,
-            border_color=self.tokens["border_strong"] if curr == videos_norm else "transparent",
+            border_color=self.tokens["border_strong"] if curr == videos_norm else self.tokens["border"],
             text_color=self.tokens["text_primary"] if curr == videos_norm else self.tokens["text_secondary"]
         )
         self.btn_dest_root.configure(
             fg_color=self.tokens["surface_elevated"] if curr == root_norm else "transparent",
             border_width=1 if curr == root_norm else 0,
-            border_color=self.tokens["border_strong"] if curr == root_norm else "transparent",
+            border_color=self.tokens["border_strong"] if curr == root_norm else self.tokens["border"],
             text_color=self.tokens["text_primary"] if curr == root_norm else self.tokens["text_secondary"]
         )
 
