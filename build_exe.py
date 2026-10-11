@@ -21,12 +21,15 @@ def build():
         shutil.copy2(ffmpeg_bin, ffmpeg_src)
         print(f"Copied FFmpeg from {ffmpeg_bin} to {ffmpeg_src}")
 
+    ico_file = os.path.join(app_dir, "assets", "app_icon.ico")
     cmd = [
         sys.executable, "-m", "PyInstaller",
         "--onefile",
         "--noconsole",
         "--name=YouTube_Downloader",
+        f"--icon={ico_file}",
         "--add-binary=ffmpeg.exe;.",
+        "--add-data=assets;assets",
         "--collect-all=customtkinter",
         "--collect-all=yt_dlp",
         "--collect-all=curl_cffi",

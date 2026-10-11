@@ -10,7 +10,8 @@ venv/
 # Build Artifacts
 build/
 dist/
-*.spec
+YouTube_Downloader.spec
+!buildozer.spec
 ffmpeg.exe
 *.exe
 

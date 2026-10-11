@@ -35,6 +35,18 @@ else:
     except Exception:
         FFMPEG_EXE = shutil.which("ffmpeg")
 
+# Application icon paths
+ICON_PNG = os.path.join(BASE_DIR, "assets", "icon_gold.png")
+ICON_ICO = os.path.join(BASE_DIR, "assets", "app_icon.ico")
+if not os.path.exists(ICON_PNG):
+    alt_png = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "icon_gold.png")
+    if os.path.exists(alt_png):
+        ICON_PNG = alt_png
+if not os.path.exists(ICON_ICO):
+    alt_ico = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "app_icon.ico")
+    if os.path.exists(alt_ico):
+        ICON_ICO = alt_ico
+
 # Dynamic download directory and user settings
 def get_default_download_dir():
     """Dynamically determine default download directory based on OS user Downloads folder."""
@@ -320,6 +332,18 @@ class UniversalDownloaderApp(ctk.CTk):
         self.geometry("1160x820")
         self.minsize(1020, 720)
 
+        # Set Window Titlebar and Taskbar Icon
+        try:
+            from PIL import Image, ImageTk
+            if os.path.exists(ICON_PNG):
+                ico_img = Image.open(ICON_PNG)
+                self._app_icon_photo = ImageTk.PhotoImage(ico_img)
+                self.wm_iconphoto(True, self._app_icon_photo)
+            if os.path.exists(ICON_ICO):
+                self.iconbitmap(ICON_ICO)
+        except Exception:
+            pass
+
         # State Variables
         self.stop_event = threading.Event()
         self.download_thread = None
@@ -418,10 +442,16 @@ class UniversalDownloaderApp(ctk.CTk):
         brand_frame = ctk.CTkFrame(top_bar, fg_color="transparent")
         brand_frame.grid(row=0, column=0, padx=18, pady=9, sticky="w")
 
-        lbl_logo = ctk.CTkLabel(
-            brand_frame, text="⚡",
-            font=ctk.CTkFont(size=15)
-        )
+        try:
+            from PIL import Image
+            if os.path.exists(ICON_PNG):
+                logo_pil = Image.open(ICON_PNG)
+                self.logo_ctk_image = ctk.CTkImage(light_image=logo_pil, dark_image=logo_pil, size=(22, 22))
+                lbl_logo = ctk.CTkLabel(brand_frame, text="", image=self.logo_ctk_image)
+            else:
+                lbl_logo = ctk.CTkLabel(brand_frame, text="⚡", font=ctk.CTkFont(size=15))
+        except Exception:
+            lbl_logo = ctk.CTkLabel(brand_frame, text="⚡", font=ctk.CTkFont(size=15))
         lbl_logo.pack(side="left", padx=(0, 8))
 
         lbl_title = ctk.CTkLabel(

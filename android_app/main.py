@@ -34,6 +34,11 @@ from kivy.uix.textinput import TextInput
 from kivy.uix.widget import Widget
 from kivy.uix.progressbar import ProgressBar
 from kivy.uix.behaviors import ButtonBehavior
+from kivy.uix.image import Image
+
+# Icon Paths
+ICON_GOLD_PATH = os.path.join(os.path.dirname(__file__), "assets", "icon_gold.png")
+ICON_APP_PATH = os.path.join(os.path.dirname(__file__), "assets", "icon.png")
 
 # Import modular download engine
 sys.path.insert(0, os.path.dirname(__file__))
@@ -451,12 +456,17 @@ class HomeScreen(Screen):
 
         root = BoxLayout(orientation="vertical", padding=[16, 12, 16, 75], spacing=12)
 
-        # Header
-        hdr = BoxLayout(orientation="vertical", size_hint_y=None, height=52, spacing=2)
+        # Header with Logo Icon
+        hdr = BoxLayout(orientation="horizontal", size_hint_y=None, height=48, spacing=10)
+        if os.path.exists(ICON_GOLD_PATH):
+            hdr_icon = Image(source=ICON_GOLD_PATH, size_hint=(None, None), size=(36, 36))
+            hdr.add_widget(hdr_icon)
+
+        hdr_text = BoxLayout(orientation="vertical", spacing=1)
         lbl_brand = Label(
             text="UNIVERSAL DOWNLOADER",
             font_name=FONT_FAMILY,
-            font_size="17sp",
+            font_size="16sp",
             bold=True,
             color=COLOR_GOLD,
             halign="left"
@@ -465,13 +475,14 @@ class HomeScreen(Screen):
         lbl_sub = Label(
             text="YouTube · Instagram · TikTok · X · Facebook · Reddit",
             font_name=FONT_FAMILY,
-            font_size="11sp",
+            font_size="10.5sp",
             color=COLOR_TEXT_MUTED,
             halign="left"
         )
         lbl_sub.bind(size=lbl_sub.setter('text_size'))
-        hdr.add_widget(lbl_brand)
-        hdr.add_widget(lbl_sub)
+        hdr_text.add_widget(lbl_brand)
+        hdr_text.add_widget(lbl_sub)
+        hdr.add_widget(hdr_text)
         root.add_widget(hdr)
 
         # Scrollable Content
@@ -1247,9 +1258,12 @@ class SettingsScreen(Screen):
 # MAIN APPLICATION CLASS
 # ==========================================================
 class UniversalDownloaderMobileApp(App):
+    icon = ICON_APP_PATH
+
     def build(self):
         Window.clearcolor = COLOR_BG
         self.title = "Universal Downloader Mobile"
+        self.icon = ICON_APP_PATH
 
         if IS_ANDROID:
             try:
