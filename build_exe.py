@@ -29,8 +29,10 @@ def build():
         "--add-binary=ffmpeg.exe;.",
         "--collect-all=customtkinter",
         "--collect-all=yt_dlp",
+        "--collect-all=curl_cffi",
         "--hidden-import=darkdetect",
         "--hidden-import=imageio_ffmpeg",
+        "--hidden-import=curl_cffi",
         "--clean",
         "--noconfirm",
         "gui_app.py"
