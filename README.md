@@ -1,92 +1,51 @@
-# YouTube Downloader (Native Windows Desktop App)
+# YouTube Downloader
 
-A modern, fast, and feature-rich YouTube Audio and Video Downloader built as a **100% native Windows desktop application** with a sleek dark GUI, live progress streaming, and zero browser involvement.
+A Windows desktop app for downloading audio or video from YouTube links and playlists. The interface is built with **CustomTkinter** and the download engine uses **yt-dlp** with FFmpeg for conversion and merging.
 
----
+## What it does
 
-## 🌟 Key Features
+- Modern dark desktop interface with quick destination shortcuts.
+- Inspect a video or playlist before downloading; show item count, total duration, and a rough size estimate.
+- Export MP3 at 128, 192, or 320 kbps; M4A audio; or MP4 video up to 1080p.
+- Optional duplicate skipping and playlist item limit.
+- Live progress, speed/ETA where available, and an activity log.
+- USB / older-player MP3 mode: 128 kbps CBR, 44.1 kHz stereo, ID3v2.3 tags, and sanitized file names.
+- Build a portable one-file Windows executable with FFmpeg bundled.
 
-- **🚫 No Browser Involvement**:
-  - Runs directly as a native Windows desktop GUI application.
-  - Zero web servers, zero localhost ports, and zero browser tabs.
-- **📻 Old Speaker / USB Compatibility Mode**:
-  - Encodes directly to **128 kbps Constant Bitrate (CBR)** at **44.1 kHz** stereo.
-  - Generates clean ASCII-sanitized filenames (FAT32 compatible) without special characters.
-  - Strips unsupported embedded album artwork to prevent older MP3 boomboxes, car stereos, and SD/USB players from skipping or freezing.
-- **🎵 High Fidelity Audio Formats**:
-  - MP3 Maximum Quality (320 kbps)
-  - MP3 High Quality (192 kbps)
-  - M4A / AAC original audio stream
-- **🎬 Full HD Video Downloads**:
-  - MP4 Video (1080p Full HD, 720p HD, Best Available, 480p)
-  - Seamless audio + video muxing via embedded FFmpeg.
-- **⚡ Streamlined Selection**:
-  - No complex toggle buttons. Paste your YouTube link and select your download option directly from the dropdown.
-  - Automatically calculates track counts, durations, and estimated download sizes.
-- **🖥️ 3-Panel Dark Theme Layout**:
-  - **Explorer** (Left): Quick folder navigation (`songs`, `videos`, custom folder) and system disk storage meter.
-  - **Downloader Card** (Center): URL input, format selector, duplicate skip toggle, and download actions.
-  - **Terminal** (Bottom): Live download progress bar, speed, ETA, and real-time color-coded console logs.
-- **📦 100% Standalone One-File Executable**:
-  - Bundles the native desktop GUI, `yt-dlp`, and **FFmpeg 7.1** into a single portable `.exe`.
+> Download only media you own or have permission to save, and follow the applicable platform terms and copyright rules.
 
----
+## Run from source
 
-## 🚀 Quick Start
+**Requirements:** Windows 10/11 and Python 3.10 or newer.
 
-### Option 1: Standalone Portable Executable (Recommended)
-[![Download Executable](https://img.shields.io/badge/Download-YouTube__Downloader.exe%20(v1.1.0)-blue?style=for-the-badge&logo=windows)](https://github.com/darimriyazquraishi/youtube-downloader/releases/download/v1.1.0/YouTube_Downloader.exe)
-
-Direct Download: **[YouTube_Downloader.exe](https://github.com/darimriyazquraishi/youtube-downloader/releases/download/v1.1.0/YouTube_Downloader.exe)** or visit the [Releases](https://github.com/darimriyazquraishi/youtube-downloader/releases) page.
-1. Download and double-click `YouTube_Downloader.exe` (no installation, Python, or FFmpeg needed).
-2. The desktop window opens immediately with zero browser involvement.
-3. Paste any YouTube link, choose your format from the dropdown, and click **▶ Start Download**.
-
-### Option 2: Running from Source
-
-#### Prerequisites
-- Windows 10/11
-- Python 3.10+
-- FFmpeg (automatically bundled or handled via `imageio-ffmpeg`)
-
-#### Installation
-```bash
-# Clone the repository
-git clone https://github.com/darimriyazquraishi/youtube-downloader.git
-cd youtube-downloader
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Run the native desktop application
+```powershell
+python -m pip install -r requirements.txt
 python gui_app.py
 ```
 
----
+If FFmpeg is installed separately, the app can use it from `PATH`. Otherwise `imageio-ffmpeg` provides a bundled FFmpeg binary when running from source.
 
-## 🔨 Building the Standalone `.exe`
+## Build a standalone `.exe`
 
-To compile the entire application into a single `.exe` with embedded FFmpeg:
-
-```bash
+```powershell
 python build_exe.py
 ```
-The compiled binary will be generated in `dist/YouTube_Downloader.exe`.
 
----
+The script builds `dist/YouTube_Downloader.exe`. It no longer copies the output to a machine-specific folder. The executable includes the desktop UI, yt-dlp, and FFmpeg.
 
-## 📁 Project Structure
+## Project layout
 
+```text
+gui_app.py       # Main native desktop application and download engine
+build_exe.py     # PyInstaller build script
+requirements.txt # Python dependencies
+run_app.bat      # One-click source launcher
+server.py        # Older local-server prototype; not used by gui_app.py
+static/          # Older browser UI prototype; not used by gui_app.py
 ```
-├── gui_app.py             # Native Windows Desktop GUI (CustomTkinter)
-├── build_exe.py           # PyInstaller build automation script
-├── run_app.bat            # One-click Windows batch launcher
-├── requirements.txt       # Python dependencies
-├── .gitignore             # Git ignore rules
-└── LICENSE                # MIT License
-```
 
----
+The current app entry point is `gui_app.py`. The `server.py` and `static/` files are retained from an earlier browser-based prototype; they are not used when launching the native desktop app.
 
-## 📄 License
-This project is released under the [MIT License](LICENSE).
+## License
+
+MIT — see [LICENSE](LICENSE).

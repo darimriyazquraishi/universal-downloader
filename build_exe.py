@@ -4,6 +4,12 @@ import shutil
 import subprocess
 
 def build():
+    # Kill any existing instance so files are not locked
+    try:
+        subprocess.run(["taskkill", "/f", "/im", "YouTube_Downloader.exe"], capture_output=True)
+    except Exception:
+        pass
+
     app_dir = os.path.dirname(os.path.abspath(__file__))
     dist_dir = os.path.join(app_dir, "dist")
     build_dir = os.path.join(app_dir, "build")
@@ -37,24 +43,24 @@ def build():
         sys.exit(proc.returncode)
 
     built_exe = os.path.join(dist_dir, "YouTube_Downloader.exe")
-    final_dest = r"e:\deleteme\YouTube_Downloader.exe"
 
     if os.path.exists(built_exe):
-        # Kill any running instance of YouTube_Downloader.exe if currently open
+        workspace_exe = r"e:\deleteme\YouTube_Downloader.exe"
         try:
             subprocess.run(["taskkill", "/f", "/im", "YouTube_Downloader.exe"], capture_output=True)
+            shutil.copy2(built_exe, workspace_exe)
         except Exception:
             pass
 
-        shutil.copy2(built_exe, final_dest)
-        size_mb = os.path.getsize(final_dest) / (1024 * 1024)
-        print(f"\n=======================================================")
-        print(f" SUCCESS: Native Desktop Windows EXE Created!")
-        print(f" Location: {final_dest}")
+        size_mb = os.path.getsize(built_exe) / (1024 * 1024)
+        print("\n=======================================================")
+        print(" SUCCESS: Native Desktop Windows EXE Created!")
+        print(f" Location: {built_exe}")
+        if os.path.exists(workspace_exe):
+            print(f" Root App: {workspace_exe}")
         print(f" Size: {size_mb:.1f} MB")
-        print(f" Bundled: Native Dark GUI + yt-dlp + FFmpeg 7.1")
-        print(f" Zero Browser Involvement: Pure Native Desktop Window")
-        print(f"=======================================================\n")
+        print(" Bundled: CustomTkinter GUI + yt-dlp + FFmpeg")
+        print("=======================================================\n")
     else:
         print(f"[ERROR] Could not find built exe at: {built_exe}")
         sys.exit(1)
