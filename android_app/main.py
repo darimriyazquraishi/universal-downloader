@@ -56,25 +56,32 @@ try:
 except Exception:
     IS_ANDROID = False
 
-# Luxury Gold Theme Palette (Artcraft / Watermelon / Seal Inspired)
-COLOR_BG = [0.045, 0.045, 0.060, 1.0]        # Deep Obsidian #0B0B0F
-COLOR_CARD = [0.085, 0.085, 0.115, 1.0]      # Elevated Surface #16161D
-COLOR_CARD_ALT = [0.12, 0.12, 0.16, 1.0]     # Sub-card Surface #1F1F29
-COLOR_BORDER = [0.20, 0.20, 0.26, 0.9]       # Subtle Border #333342
-COLOR_BORDER_GOLD = [0.83, 0.69, 0.22, 0.45] # Glowing Gold Border
-COLOR_GOLD = [0.85, 0.70, 0.24, 1.0]         # Primary Gold #D9B33D
-COLOR_GOLD_HOVER = [0.93, 0.79, 0.35, 1.0]   # Gold Hover #EDC959
-COLOR_GOLD_SUBTLE = [0.85, 0.70, 0.24, 0.12] # Gold Glow Fill
-COLOR_TEXT_WHITE = [0.96, 0.96, 0.98, 1.0]   # Main Title Text
-COLOR_TEXT_MUTED = [0.55, 0.55, 0.63, 1.0]   # Secondary Text
-COLOR_GREEN = [0.22, 0.82, 0.48, 1.0]        # Success Badge #38D17A
+# =============================================================
+# LUXURY PALETTE INSPIRED BY PINTEREST LUXURY EMBED (Zero Red)
+# Deep Emerald Obsidian + Metallic Brushed Champagne Gold + Satin Cream
+# =============================================================
+COLOR_BG = [0.035, 0.095, 0.075, 1.0]          # Deep Velvet Emerald #091813
+COLOR_CARD_DARK = [0.065, 0.165, 0.130, 1.0]   # Dark Emerald Surface #102A21
+COLOR_CARD_ALT = [0.085, 0.205, 0.160, 1.0]    # Emerald Input #163429
+COLOR_CARD_GOLD = [0.84, 0.72, 0.55, 1.0]      # Metallic Champagne Gold Card #D6B88C
+COLOR_CARD_GOLD_LIGHT = [0.90, 0.79, 0.63, 1.0]# Gold Card Highlight #E6C9A1
+COLOR_CARD_WHITE = [0.95, 0.95, 0.96, 1.0]     # Satin Cream Card #F2F2F5
+COLOR_BORDER_EMERALD = [0.12, 0.26, 0.21, 0.8] # Muted Emerald Border
+COLOR_BORDER_GOLD = [0.84, 0.72, 0.55, 0.45]   # Glowing Gold Accent Border
+COLOR_GOLD = [0.86, 0.74, 0.56, 1.0]           # Primary Champagne Gold #DCBD8F
+COLOR_GOLD_HOVER = [0.94, 0.83, 0.67, 1.0]     # Gold Hover #F0D4AB
+COLOR_GOLD_DARK = [0.65, 0.52, 0.35, 1.0]      # Dark Gold #A68559
+COLOR_TEXT_WHITE = [0.96, 0.96, 0.98, 1.0]     # Light Text
+COLOR_TEXT_DARK = [0.08, 0.14, 0.11, 1.0]      # Contrast Dark Text (on gold cards)
+COLOR_TEXT_MUTED = [0.52, 0.68, 0.60, 1.0]     # Emerald Muted Text
+COLOR_GREEN_BADGE = [0.25, 0.85, 0.55, 1.0]    # Verified Green
 
 
 # -------------------------------------------------------------
-# Clean Geometric Vector Icon (Zero missing Unicode glyphs)
+# Precision Geometric Canvas Icons
 # -------------------------------------------------------------
 class VectorIcon(Widget):
-    """Draws razor-sharp canvas vector icons to guarantee 0 missing glyphs."""
+    """Draws razor-sharp canvas vector icons with zero missing font glyphs."""
     def __init__(self, icon_type="download", is_active=False, size_px=22, **kwargs):
         super().__init__(**kwargs)
         self.icon_type = icon_type
@@ -96,41 +103,34 @@ class VectorIcon(Widget):
         with self.canvas:
             Color(*c)
             if self.icon_type == "download":
-                # Down arrow inside circular arc
+                # Geometric down-arrow within rounded shield
                 Line(circle=(cx, cy, 10), width=1.3)
                 Line(points=[cx, cy + 4, cx, cy - 3], width=1.6)
                 Line(points=[cx - 4, cy, cx, cy - 4, cx + 4, cy], width=1.6)
             elif self.icon_type == "manager":
-                # Clean list stacks
-                Line(points=[cx - 7, cy + 4, cx + 7, cy + 4], width=1.5)
-                Line(points=[cx - 7, cy, cx + 7, cy], width=1.5)
-                Line(points=[cx - 7, cy - 4, cx + 7, cy - 4], width=1.5)
-                Ellipse(pos=(cx - 10, cy + 3), size=(2.5, 2.5))
-                Ellipse(pos=(cx - 10, cy - 1), size=(2.5, 2.5))
-                Ellipse(pos=(cx - 10, cy - 5), size=(2.5, 2.5))
+                # Stack of sleek rounded cards
+                Line(rounded_rectangle=(cx - 8, cy - 2, 16, 9, 2), width=1.4)
+                Line(points=[cx - 6, cy - 5, cx + 6, cy - 5], width=1.4)
+                Line(points=[cx - 4, cy - 8, cx + 4, cy - 8], width=1.4)
             elif self.icon_type == "settings":
-                # Precision cog/sliders
+                # Concentric circles / dial
                 Line(circle=(cx, cy, 9), width=1.3)
-                Ellipse(pos=(cx - 2.5, cy - 2.5), size=(5, 5))
+                Ellipse(pos=(cx - 3, cy - 3), size=(6, 6))
                 Line(points=[cx, cy + 5, cx, cy + 9], width=1.5)
                 Line(points=[cx, cy - 5, cx, cy - 9], width=1.5)
                 Line(points=[cx - 5, cy, cx - 9, cy], width=1.5)
                 Line(points=[cx + 5, cy, cx + 9, cy], width=1.5)
-            elif self.icon_type == "paste":
-                # Clipboard icon
-                Line(rounded_rectangle=(cx - 6, cy - 7, 12, 14, 2), width=1.3)
-                Line(points=[cx - 3, cy + 7, cx + 3, cy + 7], width=1.8)
             elif self.icon_type == "play":
                 # Play triangle
-                Line(points=[cx - 4, cy - 5, cx - 4, cy + 5, cx + 5, cy, cx - 4, cy - 5], width=1.4)
+                Line(points=[cx - 3, cy - 4, cx - 3, cy + 4, cx + 5, cy, cx - 3, cy - 4], width=1.5)
 
 
 # -------------------------------------------------------------
-# Reusable Modern Mobile Components
+# Luxury Styled Card Containers
 # -------------------------------------------------------------
-class ModernCard(BoxLayout):
-    """Refined Material-3 card with soft border & ambient background."""
-    def __init__(self, bg_color=COLOR_CARD, border_color=COLOR_BORDER, radius=14, **kwargs):
+class LuxuryCard(BoxLayout):
+    """Pillowy rounded card container inspired by luxury high-end mobile UI."""
+    def __init__(self, bg_color=COLOR_CARD_DARK, border_color=COLOR_BORDER_EMERALD, radius=22, **kwargs):
         super().__init__(**kwargs)
         self.bg_color = bg_color
         self.border_color = border_color
@@ -147,22 +147,29 @@ class ModernCard(BoxLayout):
         self.rect_bg.size = self.size
         self.rect_border.rounded_rectangle = (self.pos[0], self.pos[1], self.size[0], self.size[1], self.radius)
 
+    def set_bg(self, bg_col, border_col=None):
+        self.bg_color = bg_col
+        self.col_bg.rgba = bg_col
+        if border_col:
+            self.border_color = border_col
+            self.col_border.rgba = border_col
 
-class PillButton(ButtonBehavior, BoxLayout):
-    """Touch-friendly pill button with dynamic outline/fill states."""
-    def __init__(self, text="", is_primary=False, height_dp=44, radius=12, **kwargs):
+
+class LuxuryButton(ButtonBehavior, BoxLayout):
+    """Champagne Gold pill button with smooth rounded aesthetics."""
+    def __init__(self, text="", is_gold=True, height_dp=48, radius=20, **kwargs):
         kwargs['size_hint_y'] = None
         kwargs['height'] = height_dp
         super().__init__(**kwargs)
         self.text_val = text
-        self.is_primary = is_primary
+        self.is_gold = is_gold
         self.radius = radius
         self.orientation = "horizontal"
-        self.padding = [14, 4]
+        self.padding = [16, 4]
 
-        self.normal_bg = COLOR_GOLD if is_primary else [0, 0, 0, 0]
-        self.border_col = [0, 0, 0, 0] if is_primary else COLOR_BORDER_GOLD
-        self.text_col = [0.06, 0.06, 0.08, 1.0] if is_primary else COLOR_GOLD
+        self.normal_bg = COLOR_GOLD if is_gold else COLOR_CARD_ALT
+        self.border_col = [0, 0, 0, 0] if is_gold else COLOR_BORDER_GOLD
+        self.text_col = COLOR_TEXT_DARK if is_gold else COLOR_GOLD
 
         with self.canvas.before:
             self.canvas_bg = Color(*self.normal_bg)
@@ -188,11 +195,11 @@ class PillButton(ButtonBehavior, BoxLayout):
         self.rect.size = self.size
         self.line_border.rounded_rectangle = (self.pos[0], self.pos[1], self.size[0], self.size[1], self.radius)
 
-    def set_primary(self, is_primary):
-        self.is_primary = is_primary
-        self.normal_bg = COLOR_GOLD if is_primary else [0, 0, 0, 0]
-        self.border_col = [0, 0, 0, 0] if is_primary else COLOR_BORDER_GOLD
-        self.text_col = [0.06, 0.06, 0.08, 1.0] if is_primary else COLOR_GOLD
+    def set_gold(self, is_gold):
+        self.is_gold = is_gold
+        self.normal_bg = COLOR_GOLD if is_gold else COLOR_CARD_ALT
+        self.border_col = [0, 0, 0, 0] if is_gold else COLOR_BORDER_GOLD
+        self.text_col = COLOR_TEXT_DARK if is_gold else COLOR_GOLD
         self.canvas_bg.rgba = self.normal_bg
         self.canvas_border.rgba = self.border_col
         self.lbl.color = self.text_col
@@ -202,25 +209,30 @@ class PillButton(ButtonBehavior, BoxLayout):
         self.lbl.text = text
 
 
-class StatChip(BoxLayout):
-    """Small pill badge displaying metadata stats."""
-    def __init__(self, label="", val="", **kwargs):
+class MetricPill(BoxLayout):
+    """Small pill badge displaying stats with satin luxury pill styling."""
+    def __init__(self, text="--", dark_mode=True, **kwargs):
         kwargs['size_hint'] = (None, None)
-        kwargs['size'] = (105, 30)
+        kwargs['size'] = (106, 28)
         super().__init__(**kwargs)
-        self.padding = [6, 2]
+        self.padding = [8, 2]
+        bg_col = [0.05, 0.12, 0.09, 0.95] if dark_mode else [0.90, 0.80, 0.65, 0.9]
+        border_col = COLOR_BORDER_GOLD if dark_mode else [0.65, 0.52, 0.35, 0.5]
+        text_col = COLOR_GOLD if dark_mode else COLOR_TEXT_DARK
+
         with self.canvas.before:
-            Color(0.12, 0.12, 0.16, 0.9)
-            self.rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[8])
-            Color(0.25, 0.25, 0.32, 0.8)
-            self.line = Line(rounded_rectangle=(self.pos[0], self.pos[1], self.size[0], self.size[1], 8), width=1.0)
+            Color(*bg_col)
+            self.rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[14])
+            Color(*border_col)
+            self.line = Line(rounded_rectangle=(self.pos[0], self.pos[1], self.size[0], self.size[1], 14), width=1.0)
         self.bind(pos=self._update, size=self._update)
 
         self.lbl = Label(
-            text=f"{label} {val}".strip(),
+            text=text,
             font_name=FONT_FAMILY,
             font_size="11sp",
-            color=COLOR_TEXT_WHITE,
+            bold=True,
+            color=text_col,
             halign="center",
             valign="middle"
         )
@@ -230,33 +242,31 @@ class StatChip(BoxLayout):
     def _update(self, *args):
         self.rect.pos = self.pos
         self.rect.size = self.size
-        self.line.rounded_rectangle = (self.pos[0], self.pos[1], self.size[0], self.size[1], 8)
+        self.line.rounded_rectangle = (self.pos[0], self.pos[1], self.size[0], self.size[1], 14)
 
     def update_text(self, txt):
         self.lbl.text = txt
 
 
-class NavTab(ButtonBehavior, BoxLayout):
-    """Floating Navigation bar touch tab."""
+class NavDockItem(ButtonBehavior, BoxLayout):
+    """Floating Navigation bar pill tab."""
     def __init__(self, title="", icon_name="download", target_screen="", app_ref=None, **kwargs):
         super().__init__(**kwargs)
         self.orientation = "vertical"
         self.target_screen = target_screen
         self.app_ref = app_ref
         self.padding = [4, 6]
-        self.spacing = 3
+        self.spacing = 2
 
-        # Vector Icon container
         self.box_icon = AnchorLayout(size_hint_y=0.6, anchor_x="center", anchor_y="center")
-        self.v_icon = VectorIcon(icon_type=icon_name, is_active=False)
+        self.v_icon = VectorIcon(icon_type=icon_name, is_active=False, size_px=20)
         self.box_icon.add_widget(self.v_icon)
         self.add_widget(self.box_icon)
 
-        # Tab Title
         self.lbl_title = Label(
             text=title,
             font_name=FONT_FAMILY,
-            font_size="11sp",
+            font_size="10.5sp",
             bold=True,
             color=COLOR_TEXT_MUTED,
             size_hint_y=0.4,
@@ -281,130 +291,126 @@ class HomeScreen(Screen):
         super().__init__(**kwargs)
         self.app_ref = app_ref
         self.active_analysis = None
-        self.current_mode = "video" # 'video' or 'audio'
+        self.current_mode = "video"
         self.selected_format = "video_best"
         self.is_downloading = False
         self.stop_event = threading.Event()
 
-        root = BoxLayout(orientation="vertical", padding=[16, 10, 16, 80], spacing=12)
+        root = BoxLayout(orientation="vertical", padding=[16, 8, 16, 82], spacing=10)
 
-        # 1. Elegant Top App Bar
-        app_bar = BoxLayout(orientation="horizontal", size_hint_y=None, height=48, spacing=10)
+        # 1. Monogram Header (Inspired by the Pinterest Design)
+        hdr = BoxLayout(orientation="horizontal", size_hint_y=None, height=54, spacing=10)
         
-        # Gold emblem box
-        emblem = Widget(size_hint=(None, None), size=(34, 34))
-        with emblem.canvas:
+        # Center Emblem Logo
+        logo_box = AnchorLayout(size_hint=(None, None), size=(44, 44), anchor_x="center", anchor_y="center")
+        logo_widget = Widget(size_hint=(None, None), size=(40, 40))
+        with logo_widget.canvas:
             Color(*COLOR_GOLD)
-            RoundedRectangle(pos=emblem.pos, size=emblem.size, radius=[8])
-            Color(0.08, 0.08, 0.1, 1.0)
-            Line(circle=(emblem.x + 17, emblem.y + 17, 7), width=1.8)
-        emblem.bind(pos=lambda *_: setattr(emblem.canvas.children[2], 'pos', emblem.pos) or setattr(emblem.canvas.children[5], 'circle', (emblem.x + 17, emblem.y + 17, 7)))
-        app_bar.add_widget(emblem)
+            Line(rounded_rectangle=(logo_widget.x + 2, logo_widget.y + 2, 36, 36, 12), width=1.5)
+            # Modern interlocking infinity monogram in gold
+            Line(points=[logo_widget.x + 12, logo_widget.y + 12, logo_widget.x + 12, logo_widget.y + 28, logo_widget.x + 28, logo_widget.y + 12, logo_widget.x + 28, logo_widget.y + 28], width=2.2)
+        logo_widget.bind(pos=lambda *_: setattr(logo_widget.canvas.children[2], 'rounded_rectangle', (logo_widget.x + 2, logo_widget.y + 2, 36, 36, 12)) or setattr(logo_widget.canvas.children[4], 'points', [logo_widget.x + 12, logo_widget.y + 12, logo_widget.x + 12, logo_widget.y + 28, logo_widget.x + 28, logo_widget.y + 12, logo_widget.x + 28, logo_widget.y + 28]))
+        logo_box.add_widget(logo_widget)
+        hdr.add_widget(logo_box)
 
-        # Brand Text
-        brand_box = BoxLayout(orientation="vertical", spacing=0)
-        lbl_brand = Label(
-            text="UNIVERSAL",
+        # Spaced Title & Subtitle
+        title_box = BoxLayout(orientation="vertical", spacing=1)
+        lbl_app_name = Label(
+            text="G L O B A L   C O N N E C T",
             font_name=FONT_FAMILY,
-            font_size="16sp",
+            font_size="14.5sp",
             bold=True,
             color=COLOR_TEXT_WHITE,
             halign="left"
         )
-        lbl_brand.bind(size=lbl_brand.setter('text_size'))
-        lbl_brand_sub = Label(
-            text="MEDIA DOWNLOADER",
+        lbl_app_name.bind(size=lbl_app_name.setter('text_size'))
+        lbl_app_sub = Label(
+            text="UNIVERSAL MEDIA DOWNLOAD ENGINE",
             font_name=FONT_FAMILY,
-            font_size="10sp",
+            font_size="9.5sp",
             bold=True,
             color=COLOR_GOLD,
             halign="left"
         )
-        lbl_brand_sub.bind(size=lbl_brand_sub.setter('text_size'))
-        brand_box.add_widget(lbl_brand)
-        brand_box.add_widget(lbl_brand_sub)
-        app_bar.add_widget(brand_box)
+        lbl_app_sub.bind(size=lbl_app_sub.setter('text_size'))
+        title_box.add_widget(lbl_app_name)
+        title_box.add_widget(lbl_app_sub)
+        hdr.add_widget(title_box)
 
-        # Quick Manager counter button on header
-        btn_quick_mgr = PillButton(text="QUEUE ≡", is_primary=False, height_dp=34, size_hint_x=0.3)
-        btn_quick_mgr.bind(on_release=lambda *_: self.app_ref.switch_screen("manager"))
-        app_bar.add_widget(btn_quick_mgr)
-        root.add_widget(app_bar)
+        # Top Right Status Pill
+        pill_status = MetricPill(text="PRO ACTIVE", dark_mode=False)
+        pill_status.size = (90, 26)
+        hdr.add_widget(pill_status)
+        root.add_widget(hdr)
 
-        # 2. Supported Platforms Ribbon
-        ribbon = Label(
-            text="YouTube · Instagram · TikTok · X · Facebook · Reddit · Vimeo",
-            font_name=FONT_FAMILY,
-            font_size="10.5sp",
-            color=COLOR_TEXT_MUTED,
-            size_hint_y=None,
-            height=16,
-            halign="left"
-        )
-        ribbon.bind(size=ribbon.setter('text_size'))
-        root.add_widget(ribbon)
-
-        # 3. Scrollable Main Content
+        # 2. Main Scrollable Container
         scroll = ScrollView(size_hint=(1, 1), do_scroll_x=False)
-        content = BoxLayout(orientation="vertical", size_hint_y=None, spacing=12)
+        content = BoxLayout(orientation="vertical", size_hint_y=None, spacing=11)
         content.bind(minimum_height=content.setter('height'))
 
-        # Modern Search / URL Input Card
-        card_search = ModernCard(orientation="vertical", padding=12, spacing=10, size_hint_y=None, height=122)
+        # 3. Card 1: Input URL & Quick Paste Pill
+        card_input = LuxuryCard(orientation="vertical", padding=14, spacing=10, size_hint_y=None, height=128, radius=22)
         
-        row_input = BoxLayout(orientation="horizontal", spacing=8, size_hint_y=None, height=44)
+        row_inp = BoxLayout(orientation="horizontal", spacing=8, size_hint_y=None, height=44)
         self.input_url = TextInput(
-            hint_text="Paste video, reel, or playlist link...",
+            hint_text="Paste video, reel, post, or playlist URL...",
             font_name=FONT_FAMILY,
             font_size="13sp",
             multiline=False,
-            size_hint_x=0.74,
+            size_hint_x=0.73,
             background_color=COLOR_CARD_ALT,
             foreground_color=COLOR_TEXT_WHITE,
             cursor_color=COLOR_GOLD,
             padding=[12, 11]
         )
-        self.input_url.bind(text=self.on_url_typed)
-
-        # Inline Paste Button
-        btn_paste = PillButton(text="PASTE", is_primary=False, height_dp=44, size_hint_x=0.26)
+        btn_paste = LuxuryButton(text="PASTE", is_gold=True, height_dp=44, radius=18, size_hint_x=0.27)
         btn_paste.bind(on_release=self.action_paste)
-        row_input.add_widget(self.input_url)
-        row_input.add_widget(btn_paste)
-        card_search.add_widget(row_input)
+        row_inp.add_widget(self.input_url)
+        row_inp.add_widget(btn_paste)
+        card_input.add_widget(row_inp)
 
-        # Secondary action row
-        row_sec = BoxLayout(orientation="horizontal", spacing=8, size_hint_y=None, height=36)
-        self.btn_inspect = PillButton(text="CHECK & INSPECT LINK", is_primary=False, height_dp=36, size_hint_x=0.75)
+        row_acts = BoxLayout(orientation="horizontal", spacing=8, size_hint_y=None, height=36)
+        self.btn_inspect = LuxuryButton(text="INSPECT LINK", is_gold=False, height_dp=36, radius=16, size_hint_x=0.72)
         self.btn_inspect.bind(on_release=self.action_inspect)
-        self.btn_clear = PillButton(text="CLEAR", is_primary=False, height_dp=36, size_hint_x=0.25)
+        self.btn_clear = LuxuryButton(text="CLEAR", is_gold=False, height_dp=36, radius=16, size_hint_x=0.28)
         self.btn_clear.bind(on_release=self.action_clear)
-        row_sec.add_widget(self.btn_inspect)
-        row_sec.add_widget(self.btn_clear)
-        card_search.add_widget(row_sec)
-        content.add_widget(card_search)
+        row_acts.add_widget(self.btn_inspect)
+        row_acts.add_widget(self.btn_clear)
+        card_input.add_widget(row_acts)
+        content.add_widget(card_input)
 
-        # 4. Hero Media Inspection Card (Seal Style)
-        self.card_inspect = ModernCard(orientation="vertical", padding=12, spacing=8, size_hint_y=None, height=128)
+        # 4. Card 2: Metallic Champagne Gold Hero Inspection Card
+        # (Directly styling the top golden card in the reference image)
+        self.card_inspect = LuxuryCard(
+            orientation="vertical",
+            padding=14,
+            spacing=8,
+            size_hint_y=None,
+            height=134,
+            radius=24,
+            bg_color=COLOR_CARD_GOLD,
+            border_color=COLOR_BORDER_GOLD
+        )
         
-        row_badge = BoxLayout(orientation="horizontal", size_hint_y=None, height=22)
-        self.badge_platform = Label(
-            text="✦ READY TO INSPECT",
+        row_insp_top = BoxLayout(orientation="horizontal", size_hint_y=None, height=24)
+        self.lbl_badge = Label(
+            text="✦ READY FOR MEDIA",
             font_name=FONT_FAMILY,
             font_size="11sp",
             bold=True,
-            color=COLOR_GOLD,
+            color=COLOR_TEXT_DARK,
             halign="left"
         )
-        self.badge_platform.bind(size=self.badge_platform.setter('text_size'))
-        row_badge.add_widget(self.badge_platform)
-        self.card_inspect.add_widget(row_badge)
+        self.lbl_badge.bind(size=self.lbl_badge.setter('text_size'))
+        row_insp_top.add_widget(self.lbl_badge)
+        self.card_inspect.add_widget(row_insp_top)
 
         self.lbl_title = Label(
-            text="Paste any media link above to inspect quality, track count, and duration.",
+            text="Paste any video link above to inspect quality, duration, and file size.",
             font_name=FONT_FAMILY,
             font_size="13sp",
-            color=COLOR_TEXT_WHITE,
+            bold=True,
+            color=COLOR_TEXT_DARK,
             size_hint_y=None,
             height=38,
             halign="left"
@@ -412,58 +418,53 @@ class HomeScreen(Screen):
         self.lbl_title.bind(size=self.lbl_title.setter('text_size'))
         self.card_inspect.add_widget(self.lbl_title)
 
-        # Stats Chips Row
-        self.row_stats = BoxLayout(orientation="horizontal", spacing=6, size_hint_y=None, height=30)
-        self.chip_items = StatChip(label="Items:", val="--")
-        self.chip_dur = StatChip(label="Length:", val="--")
-        self.chip_size = StatChip(label="Est:", val="--")
-        self.row_stats.add_widget(self.chip_items)
-        self.row_stats.add_widget(self.chip_dur)
-        self.row_stats.add_widget(self.chip_size)
-        self.card_inspect.add_widget(self.row_stats)
+        # Metrics Pills inside the Gold Card
+        self.row_chips = BoxLayout(orientation="horizontal", spacing=6, size_hint_y=None, height=30)
+        self.chip_items = MetricPill(text="Items: --", dark_mode=True)
+        self.chip_dur = MetricPill(text="Length: --", dark_mode=True)
+        self.chip_size = MetricPill(text="Est: --", dark_mode=True)
+        self.row_chips.add_widget(self.chip_items)
+        self.row_chips.add_widget(self.chip_dur)
+        self.row_chips.add_widget(self.chip_size)
+        self.card_inspect.add_widget(self.row_chips)
         content.add_widget(self.card_inspect)
 
-        # 5. Output Profile Selector (Segmented Switch + Quality Pills)
-        card_format = ModernCard(orientation="vertical", padding=12, spacing=10, size_hint_y=None, height=138)
+        # 5. Card 3: Satin White / Dark Contrast Format Selector
+        card_format = LuxuryCard(
+            orientation="vertical",
+            padding=14,
+            spacing=10,
+            size_hint_y=None,
+            height=136,
+            radius=22,
+            bg_color=COLOR_CARD_DARK,
+            border_color=COLOR_BORDER_EMERALD
+        )
         
-        # Segmented Video / Audio Switch
+        # Segmented Video / Audio Pill Switch
         row_mode = BoxLayout(orientation="horizontal", spacing=8, size_hint_y=None, height=36)
-        self.btn_mode_video = PillButton(text="🎬 VIDEO (MP4)", is_primary=True, height_dp=36, size_hint_x=0.5)
+        self.btn_mode_video = LuxuryButton(text="🎬 VIDEO (MP4)", is_gold=True, height_dp=36, radius=16, size_hint_x=0.5)
         self.btn_mode_video.bind(on_release=lambda *_: self.switch_mode("video"))
-        self.btn_mode_audio = PillButton(text="🎵 AUDIO (MP3/M4A)", is_primary=False, height_dp=36, size_hint_x=0.5)
+        self.btn_mode_audio = LuxuryButton(text="🎵 AUDIO (MP3)", is_gold=False, height_dp=36, radius=16, size_hint_x=0.5)
         self.btn_mode_audio.bind(on_release=lambda *_: self.switch_mode("audio"))
         row_mode.add_widget(self.btn_mode_video)
         row_mode.add_widget(self.btn_mode_audio)
         card_format.add_widget(row_mode)
 
-        # Sub-pills Row
+        # Sub-pills Row (Clean Single-Line Quality Options)
         self.row_qualities = BoxLayout(orientation="horizontal", spacing=6, size_hint_y=None, height=36)
         self.quality_buttons = {}
         self.build_quality_buttons("video")
         card_format.add_widget(self.row_qualities)
         content.add_widget(card_format)
 
-        # 6. Live Progress & Status HUD
-        self.card_hud = ModernCard(orientation="vertical", padding=12, spacing=6, size_hint_y=None, height=88)
+        # 6. Live Progress HUD Card
+        self.card_hud = LuxuryCard(orientation="vertical", padding=12, spacing=6, size_hint_y=None, height=86, radius=20)
         
         row_hud_top = BoxLayout(orientation="horizontal", size_hint_y=None, height=18)
-        self.lbl_hud_status = Label(
-            text="Engine Standby",
-            font_name=FONT_FAMILY,
-            font_size="11.5sp",
-            color=COLOR_TEXT_MUTED,
-            halign="left"
-        )
+        self.lbl_hud_status = Label(text="Standby", font_name=FONT_FAMILY, font_size="11sp", color=COLOR_TEXT_MUTED, halign="left")
         self.lbl_hud_status.bind(size=self.lbl_hud_status.setter('text_size'))
-        self.lbl_hud_pct = Label(
-            text="0%",
-            font_name=FONT_FAMILY,
-            font_size="12sp",
-            bold=True,
-            color=COLOR_GOLD,
-            size_hint_x=0.25,
-            halign="right"
-        )
+        self.lbl_hud_pct = Label(text="0%", font_name=FONT_FAMILY, font_size="12sp", bold=True, color=COLOR_GOLD, size_hint_x=0.25, halign="right")
         self.lbl_hud_pct.bind(size=self.lbl_hud_pct.setter('text_size'))
         row_hud_top.add_widget(self.lbl_hud_status)
         row_hud_top.add_widget(self.lbl_hud_pct)
@@ -482,9 +483,9 @@ class HomeScreen(Screen):
         self.card_hud.add_widget(row_hud_bottom)
         content.add_widget(self.card_hud)
 
-        # 7. Hero CTA Download Button
-        self.btn_download = PillButton(text="DOWNLOAD NOW", is_primary=True, height_dp=54, radius=14)
-        self.btn_download.lbl.font_size = "16sp"
+        # 7. Hero CTA Download Button (Brushed Gold Pill)
+        self.btn_download = LuxuryButton(text="DOWNLOAD NOW", is_gold=True, height_dp=54, radius=22)
+        self.btn_download.lbl.font_size = "15.5sp"
         self.btn_download.bind(on_release=self.action_start_download)
         content.add_widget(self.btn_download)
 
@@ -515,31 +516,28 @@ class HomeScreen(Screen):
 
         for key, title in options:
             is_active = (key == self.selected_format)
-            btn = PillButton(text=title, is_primary=is_active, height_dp=34, radius=8)
-            btn.lbl.font_size = "12sp"
+            btn = LuxuryButton(text=title, is_gold=is_active, height_dp=34, radius=14)
+            btn.lbl.font_size = "11.5sp"
             btn.bind(on_release=lambda instance, k=key: self.select_quality(k))
             self.quality_buttons[key] = btn
             self.row_qualities.add_widget(btn)
 
     def switch_mode(self, mode):
         self.current_mode = mode
-        self.btn_mode_video.set_primary(mode == "video")
-        self.btn_mode_audio.set_primary(mode == "audio")
+        self.btn_mode_video.set_gold(mode == "video")
+        self.btn_mode_audio.set_gold(mode == "audio")
         self.build_quality_buttons(mode)
 
     def select_quality(self, key):
         self.selected_format = key
         for k, btn in self.quality_buttons.items():
-            btn.set_primary(k == key)
-
-    def on_url_typed(self, instance, text):
-        pass
+            btn.set_gold(k == key)
 
     def action_clear(self, *args):
         self.input_url.text = ""
         self.active_analysis = None
-        self.badge_platform.text = "✦ READY TO INSPECT"
-        self.lbl_title.text = "Paste any media link above to inspect quality, track count, and duration."
+        self.lbl_badge.text = "✦ READY FOR MEDIA"
+        self.lbl_title.text = "Paste any video link above to inspect quality, duration, and file size."
         self.chip_items.update_text("Items: --")
         self.chip_dur.update_text("Length: --")
         self.chip_size.update_text("Est: --")
@@ -559,7 +557,7 @@ class HomeScreen(Screen):
         if not url:
             return
         self.btn_inspect.set_text("ANALYZING...")
-        self.badge_platform.text = "✦ CONNECTING TO PLATFORM..."
+        self.lbl_badge.text = "✦ CONNECTING..."
 
         def worker():
             try:
@@ -572,16 +570,16 @@ class HomeScreen(Screen):
 
     def on_inspect_success(self, res):
         self.active_analysis = res
-        self.btn_inspect.set_text("CHECK & INSPECT LINK")
-        self.badge_platform.text = f"✦ VERIFIED {res['platform'].upper()}"
+        self.btn_inspect.set_text("INSPECT LINK")
+        self.lbl_badge.text = f"✦ VERIFIED {res['platform'].upper()}"
         self.lbl_title.text = res['title']
         self.chip_items.update_text(f"{res['track_count']} item(s)")
         self.chip_dur.update_text(res['duration_str'])
         self.chip_size.update_text(f"~{res['size_estimate']}")
 
     def on_inspect_error(self, err):
-        self.btn_inspect.set_text("CHECK & INSPECT LINK")
-        self.badge_platform.text = "✕ INSPECTION ERROR"
+        self.btn_inspect.set_text("INSPECT LINK")
+        self.lbl_badge.text = "✕ INSPECTION FAILED"
         self.lbl_title.text = err[:90]
 
     def action_start_download(self, *args):
@@ -599,7 +597,7 @@ class HomeScreen(Screen):
         self.btn_download.set_text("DOWNLOADING MEDIA...")
         self.bar_hud.value = 0
         self.lbl_hud_pct.text = "0%"
-        self.lbl_hud_status.text = "Extracting video streams..."
+        self.lbl_hud_status.text = "Extracting media streams..."
 
         def worker():
             platform = engine.detect_platform(url)
@@ -698,14 +696,14 @@ class ManagerScreen(Screen):
         self.app_ref = app_ref
         self.items_data = {}
 
-        root = BoxLayout(orientation="vertical", padding=[16, 12, 16, 80], spacing=12)
+        root = BoxLayout(orientation="vertical", padding=[16, 12, 16, 82], spacing=12)
 
         # Header
         hdr = BoxLayout(orientation="horizontal", size_hint_y=None, height=44)
         lbl_brand = Label(
             text="DOWNLOAD MANAGER",
             font_name=FONT_FAMILY,
-            font_size="17sp",
+            font_size="16sp",
             bold=True,
             color=COLOR_GOLD,
             halign="left"
@@ -714,13 +712,12 @@ class ManagerScreen(Screen):
         hdr.add_widget(lbl_brand)
         root.add_widget(hdr)
 
-        # Scrollable items list
         scroll = ScrollView(size_hint=(1, 1), do_scroll_x=False)
         self.list_layout = BoxLayout(orientation="vertical", size_hint_y=None, spacing=10)
         self.list_layout.bind(minimum_height=self.list_layout.setter('height'))
 
         self.lbl_empty = Label(
-            text="No active downloads or history.\nClips and tracks saved will appear here.",
+            text="No active downloads or history yet.\nSaved media items will appear here.",
             font_name=FONT_FAMILY,
             font_size="13sp",
             color=COLOR_TEXT_MUTED,
@@ -734,8 +731,7 @@ class ManagerScreen(Screen):
         scroll.add_widget(self.list_layout)
         root.add_widget(scroll)
 
-        # Clear history button
-        btn_clear = PillButton(text="CLEAR HISTORY", is_primary=False, height_dp=42)
+        btn_clear = LuxuryButton(text="CLEAR HISTORY", is_gold=False, height_dp=42, radius=18)
         btn_clear.bind(on_release=self.clear_all)
         root.add_widget(btn_clear)
 
@@ -745,7 +741,7 @@ class ManagerScreen(Screen):
         if self.lbl_empty in self.list_layout.children:
             self.list_layout.remove_widget(self.lbl_empty)
 
-        card = ModernCard(orientation="vertical", padding=10, spacing=8, size_hint_y=None, height=88)
+        card = LuxuryCard(orientation="vertical", padding=12, spacing=8, size_hint_y=None, height=92, radius=20)
         
         row_top = BoxLayout(orientation="horizontal", size_hint_y=None, height=22)
         lbl_title = Label(
@@ -773,11 +769,11 @@ class ManagerScreen(Screen):
         card.add_widget(row_top)
 
         row_actions = BoxLayout(orientation="horizontal", spacing=8, size_hint_y=None, height=32)
-        btn_open = PillButton(text="PLAY FILE", is_primary=True, height_dp=32, radius=8, size_hint_x=0.5)
-        btn_open.lbl.font_size = "12sp"
+        btn_open = LuxuryButton(text="PLAY FILE", is_gold=True, height_dp=32, radius=14, size_hint_x=0.5)
+        btn_open.lbl.font_size = "11.5sp"
         btn_open.bind(on_release=lambda x: self.open_file(path))
-        btn_folder = PillButton(text="FOLDER", is_primary=False, height_dp=32, radius=8, size_hint_x=0.5)
-        btn_folder.lbl.font_size = "12sp"
+        btn_folder = LuxuryButton(text="FOLDER", is_gold=False, height_dp=32, radius=14, size_hint_x=0.5)
+        btn_folder.lbl.font_size = "11.5sp"
         btn_folder.bind(on_release=lambda x: self.open_folder(path))
         row_actions.add_widget(btn_open)
         row_actions.add_widget(btn_folder)
@@ -789,7 +785,7 @@ class ManagerScreen(Screen):
     def mark_completed(self, name, full_path):
         if name in self.items_data:
             self.items_data[name]["status_lbl"].text = "✓ Saved"
-            self.items_data[name]["status_lbl"].color = COLOR_GREEN
+            self.items_data[name]["status_lbl"].color = COLOR_GREEN_BADGE
             self.items_data[name]["path"] = full_path
 
     def mark_failed(self, name):
@@ -847,14 +843,14 @@ class SettingsScreen(Screen):
         self.app_ref = app_ref
         self.cfg = engine.load_settings()
 
-        root = BoxLayout(orientation="vertical", padding=[16, 12, 16, 80], spacing=12)
+        root = BoxLayout(orientation="vertical", padding=[16, 12, 16, 82], spacing=12)
 
         # Header
         hdr = BoxLayout(orientation="horizontal", size_hint_y=None, height=44)
         lbl_brand = Label(
             text="SETTINGS",
             font_name=FONT_FAMILY,
-            font_size="17sp",
+            font_size="16sp",
             bold=True,
             color=COLOR_GOLD,
             halign="left"
@@ -868,7 +864,7 @@ class SettingsScreen(Screen):
         content.bind(minimum_height=content.setter('height'))
 
         # Destination Storage Card
-        card_dest = ModernCard(orientation="vertical", padding=12, spacing=10, size_hint_y=None, height=138)
+        card_dest = LuxuryCard(orientation="vertical", padding=14, spacing=10, size_hint_y=None, height=140, radius=22)
         lbl_d = Label(
             text="STORAGE DESTINATION",
             font_name=FONT_FAMILY,
@@ -897,9 +893,9 @@ class SettingsScreen(Screen):
         card_dest.add_widget(self.input_dest)
 
         row_dest_act = BoxLayout(orientation="horizontal", spacing=8, size_hint_y=None, height=36)
-        btn_save_dest = PillButton(text="SAVE FOLDER", is_primary=True, height_dp=36, size_hint_x=0.5)
+        btn_save_dest = LuxuryButton(text="SAVE FOLDER", is_gold=True, height_dp=36, radius=16, size_hint_x=0.5)
         btn_save_dest.bind(on_release=self.save_folder)
-        btn_reset_dest = PillButton(text="RESET DEFAULT", is_primary=False, height_dp=36, size_hint_x=0.5)
+        btn_reset_dest = LuxuryButton(text="RESET DEFAULT", is_gold=False, height_dp=36, radius=16, size_hint_x=0.5)
         btn_reset_dest.bind(on_release=self.reset_folder)
         row_dest_act.add_widget(btn_save_dest)
         row_dest_act.add_widget(btn_reset_dest)
@@ -907,7 +903,7 @@ class SettingsScreen(Screen):
         content.add_widget(card_dest)
 
         # Batch & Duplicate Preferences
-        card_dups = ModernCard(orientation="vertical", padding=12, spacing=10, size_hint_y=None, height=128)
+        card_dups = LuxuryCard(orientation="vertical", padding=14, spacing=10, size_hint_y=None, height=128, radius=22)
         lbl_dup_title = Label(
             text="DOWNLOAD RULES",
             font_name=FONT_FAMILY,
@@ -931,13 +927,12 @@ class SettingsScreen(Screen):
             halign="left"
         )
         self.lbl_dup_status.bind(size=self.lbl_dup_status.setter('text_size'))
-        btn_toggle_dup = PillButton(text="TOGGLE", is_primary=False, height_dp=34, size_hint_x=0.3)
+        btn_toggle_dup = LuxuryButton(text="TOGGLE", is_gold=False, height_dp=34, radius=14, size_hint_x=0.3)
         btn_toggle_dup.bind(on_release=self.toggle_dup)
         row_dup.add_widget(self.lbl_dup_status)
         row_dup.add_widget(btn_toggle_dup)
         card_dups.add_widget(row_dup)
 
-        # Max limit row
         row_limit = BoxLayout(orientation="horizontal", size_hint_y=None, height=34)
         lbl_limit = Label(
             text="Playlist Max Limit (0 for all):",
@@ -965,7 +960,7 @@ class SettingsScreen(Screen):
         content.add_widget(card_dups)
 
         # Engine Info Card
-        card_info = ModernCard(orientation="vertical", padding=12, spacing=6, size_hint_y=None, height=135)
+        card_info = LuxuryCard(orientation="vertical", padding=14, spacing=6, size_hint_y=None, height=135, radius=22)
         lbl_info_head = Label(
             text="SYSTEM & ENGINE",
             font_name=FONT_FAMILY,
@@ -977,11 +972,11 @@ class SettingsScreen(Screen):
             halign="left"
         )
         lbl_info_head.bind(size=lbl_info_head.setter('text_size'))
-        lbl_info1 = Label(text="Engine: yt-dlp + FFmpeg (Direct Stream)", font_name=FONT_FAMILY, font_size="12sp", color=COLOR_TEXT_WHITE, size_hint_y=None, height=18, halign="left")
+        lbl_info1 = Label(text="Core: yt-dlp + FFmpeg (Multi-Stream Merge)", font_name=FONT_FAMILY, font_size="12sp", color=COLOR_TEXT_WHITE, size_hint_y=None, height=18, halign="left")
         lbl_info1.bind(size=lbl_info1.setter('text_size'))
         lbl_info2 = Label(text="Supported: YouTube, Instagram, TikTok, X, FB, Reddit", font_name=FONT_FAMILY, font_size="11sp", color=COLOR_TEXT_MUTED, size_hint_y=None, height=18, halign="left")
         lbl_info2.bind(size=lbl_info2.setter('text_size'))
-        lbl_info3 = Label(text="Design System: Material 3 + Artcraft Gold Aesthetic", font_name=FONT_FAMILY, font_size="11sp", color=COLOR_TEXT_MUTED, size_hint_y=None, height=18, halign="left")
+        lbl_info3 = Label(text="Theme: Emerald Obsidian & Brushed Champagne Gold", font_name=FONT_FAMILY, font_size="11sp", color=COLOR_TEXT_MUTED, size_hint_y=None, height=18, halign="left")
         lbl_info3.bind(size=lbl_info3.setter('text_size'))
         card_info.add_widget(lbl_info_head)
         card_info.add_widget(lbl_info1)
@@ -1049,31 +1044,33 @@ class UniversalDownloaderMobileApp(App):
         self.sm.add_widget(self.manager_screen)
         self.sm.add_widget(self.settings_screen)
 
-        # Elevated Floating Bottom Navigation Bar
-        self.nav_bar = ModernCard(
+        # Floating Bottom Dock (Pill Shaped container matching the reference design)
+        dock_container = AnchorLayout(anchor_x="center", anchor_y="bottom", size_hint=(1, None), height=72, padding=[24, 8])
+        self.nav_dock = LuxuryCard(
             orientation="horizontal",
             size_hint=(1, None),
-            height=66,
-            padding=[20, 2],
-            spacing=16,
-            bg_color=[0.07, 0.07, 0.09, 0.98],
+            height=58,
+            padding=[16, 2],
+            spacing=12,
+            bg_color=[0.05, 0.13, 0.10, 0.98],
             border_color=COLOR_BORDER_GOLD,
-            radius=16
+            radius=26
         )
 
-        self.nav_home = NavTab(title="Downloader", icon_name="download", target_screen="home", app_ref=self)
-        self.nav_mgr = NavTab(title="Manager", icon_name="manager", target_screen="manager", app_ref=self)
-        self.nav_set = NavTab(title="Settings", icon_name="settings", target_screen="settings", app_ref=self)
+        self.nav_home = NavDockItem(title="Downloader", icon_name="download", target_screen="home", app_ref=self)
+        self.nav_mgr = NavDockItem(title="Manager", icon_name="manager", target_screen="manager", app_ref=self)
+        self.nav_set = NavDockItem(title="Settings", icon_name="settings", target_screen="settings", app_ref=self)
 
-        self.nav_bar.add_widget(self.nav_home)
-        self.nav_bar.add_widget(self.nav_mgr)
-        self.nav_bar.add_widget(self.nav_set)
+        self.nav_dock.add_widget(self.nav_home)
+        self.nav_dock.add_widget(self.nav_mgr)
+        self.nav_dock.add_widget(self.nav_set)
         self.nav_home.set_active(True)
 
-        self.master_layout.add_widget(self.sm)
-        self.master_layout.add_widget(self.nav_bar)
+        dock_container.add_widget(self.nav_dock)
 
-        # Handle incoming Android Share Intent
+        self.master_layout.add_widget(self.sm)
+        self.master_layout.add_widget(dock_container)
+
         Clock.schedule_once(self.check_android_share_intent, 0.5)
 
         return self.master_layout
