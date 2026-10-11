@@ -2,6 +2,7 @@ import os
 import sys
 import re
 import time
+import json
 import shutil
 import threading
 import unicodedata
@@ -18,7 +19,7 @@ else:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     EXE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Find FFmpeg binary
+# Find FFmpeg binary dynamically
 bundled_ffmpeg_meipass = os.path.join(BASE_DIR, "ffmpeg.exe")
 local_ffmpeg = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ffmpeg.exe")
 if os.path.exists(bundled_ffmpeg_meipass):
@@ -32,10 +33,46 @@ else:
     except Exception:
         FFMPEG_EXE = shutil.which("ffmpeg")
 
-# Default folders
-DEFAULT_SONGS = r"e:\deleteme\songs" if os.path.exists(r"e:\deleteme\songs") else os.path.join(EXE_DIR, "songs")
-DEFAULT_VIDEOS = r"e:\deleteme\videos" if os.path.exists(r"e:\deleteme\videos") else os.path.join(EXE_DIR, "videos")
-DEFAULT_ROOT = r"e:\deleteme" if os.path.exists(r"e:\deleteme") else EXE_DIR
+# Dynamic download directory and user settings (no hardcoded machine paths)
+def get_default_download_dir():
+    """Dynamically determine default download directory based on OS user Downloads folder."""
+    user_downloads = os.path.join(os.path.expanduser("~"), "Downloads")
+    if os.path.exists(user_downloads):
+        return os.path.normpath(os.path.join(user_downloads, "YouTube Downloads"))
+    return os.path.normpath(os.path.join(EXE_DIR, "downloads"))
+
+def get_config_file():
+    """Path to the user configuration file stored in %APPDATA% or ~/.youtube_downloader."""
+    appdata = os.getenv("APPDATA")
+    if appdata and os.path.exists(appdata):
+        cfg_dir = os.path.join(appdata, "YouTubeDownloader")
+    else:
+        cfg_dir = os.path.join(os.path.expanduser("~"), ".youtube_downloader")
+    os.makedirs(cfg_dir, exist_ok=True)
+    return os.path.join(cfg_dir, "settings.json")
+
+def load_saved_destination():
+    """Load previously selected destination or fall back to dynamic default."""
+    try:
+        cfg_file = get_config_file()
+        if os.path.exists(cfg_file):
+            with open(cfg_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                saved = data.get("download_dir")
+                if saved and os.path.exists(saved):
+                    return os.path.normpath(saved)
+    except Exception:
+        pass
+    return get_default_download_dir()
+
+def save_destination(dest_path):
+    """Save the user's chosen destination path for future sessions."""
+    try:
+        cfg_file = get_config_file()
+        with open(cfg_file, "w", encoding="utf-8") as f:
+            json.dump({"download_dir": os.path.normpath(dest_path)}, f, indent=2)
+    except Exception:
+        pass
 
 # Primary Font Configuration
 FONT_FAMILY = "Sebino Soft Regular"
@@ -123,10 +160,9 @@ class YouTubeDownloaderApp(ctk.CTk):
         Luxurious Gold + Sebino Soft Design System:
         - Primary typography: Sebino Soft Regular
         - Color palette: Deep obsidian canvas (#09090B) with rich gold accents (#D4AF37, #E5C158)
-        - Absolutely no red colors anywhere
-        - Top header is clean and minimal (no engine online pill)
-        - Left sidebar is a dedicated Download Manager (active downloads & saved history)
-        - Quick destination selector in main panel
+        - Clean and minimal top header
+        - Left sidebar: Dedicated Download Manager
+        - Clean Save Location section without any hardcoded buttons or paths
         - 3-Column live telemetry HUD (Speed, ETA, Progress) in Gold
         """
         self.configure(fg_color="#09090B")
@@ -146,7 +182,7 @@ class YouTubeDownloaderApp(ctk.CTk):
             "text_primary": "#FAFAFA",
             "text_secondary": "#A1A1AA",
             "text_muted": "#71717A",
-            # Luxurious Gold Accent Palette
+            # Luxurious Gold Accent Palette (No red)
             "gold": "#D4AF37",
             "gold_bright": "#E5C158",
             "gold_hover": "#F0CE68",
@@ -195,7 +231,7 @@ class YouTubeDownloaderApp(ctk.CTk):
         )
         lbl_tag.pack(side="left", padx=8)
 
-        # Right side: Minimal version mark (Engine Online removed as requested)
+        # Right side: Minimal version mark
         lbl_ver = ctk.CTkLabel(
             top_bar, text="v1.3.0",
             font=ctk.CTkFont(family=FONT_FAMILY, size=10),
@@ -422,46 +458,15 @@ class YouTubeDownloaderApp(ctk.CTk):
         )
         self.lbl_format_hint.pack(fill="x", pady=(0, 10))
 
-        # 3. Parameters Row: Quick Destination Pills + Save Path + Limit
+        # 3. Parameters Row: Save Path (dynamic default, persistent, no hardcoded pills)
         params_header = ctk.CTkFrame(controls_panel, fg_color="transparent")
-        params_header.pack(fill="x", pady=(0, 4))
+        params_header.pack(fill="x", pady=(0, 6))
 
         ctk.CTkLabel(
             params_header, text="03 / SAVE LOCATION & LIMITS",
             font=ctk.CTkFont(family=FONT_FAMILY, size=10, weight="bold"),
             text_color=self.tokens["text_muted"]
         ).pack(side="left")
-
-        # Quick Destination Preset Pills
-        quick_dest_row = ctk.CTkFrame(params_header, fg_color="transparent")
-        quick_dest_row.pack(side="right")
-
-        self.btn_pill_songs = ctk.CTkButton(
-            quick_dest_row, text="♫ songs", width=62, height=22, corner_radius=3,
-            font=ctk.CTkFont(family=FONT_FAMILY, size=9),
-            fg_color=self.tokens["surface_elevated"], hover_color=self.tokens["gold_dark"],
-            border_width=1, border_color=self.tokens["gold_border"],
-            text_color=self.tokens["gold_bright"], command=lambda: self.set_destination(DEFAULT_SONGS)
-        )
-        self.btn_pill_songs.pack(side="left", padx=2)
-
-        self.btn_pill_videos = ctk.CTkButton(
-            quick_dest_row, text="▣ videos", width=62, height=22, corner_radius=3,
-            font=ctk.CTkFont(family=FONT_FAMILY, size=9),
-            fg_color=self.tokens["surface_elevated"], hover_color=self.tokens["gold_dark"],
-            border_width=1, border_color=self.tokens["border"],
-            text_color=self.tokens["text_secondary"], command=lambda: self.set_destination(DEFAULT_VIDEOS)
-        )
-        self.btn_pill_videos.pack(side="left", padx=2)
-
-        self.btn_pill_root = ctk.CTkButton(
-            quick_dest_row, text="⌂ root", width=52, height=22, corner_radius=3,
-            font=ctk.CTkFont(family=FONT_FAMILY, size=9),
-            fg_color=self.tokens["surface_elevated"], hover_color=self.tokens["gold_dark"],
-            border_width=1, border_color=self.tokens["border"],
-            text_color=self.tokens["text_secondary"], command=lambda: self.set_destination(DEFAULT_ROOT)
-        )
-        self.btn_pill_root.pack(side="left", padx=2)
 
         # Path input and limit row
         params_row = ctk.CTkFrame(controls_panel, fg_color="transparent")
@@ -472,6 +477,7 @@ class YouTubeDownloaderApp(ctk.CTk):
         dest_inner = ctk.CTkFrame(params_row, fg_color="transparent")
         dest_inner.grid(row=0, column=0, sticky="ew", padx=(0, 10))
 
+        initial_dest = load_saved_destination()
         self.entry_dest = ctk.CTkEntry(
             dest_inner, height=36, corner_radius=4,
             border_width=1, border_color=self.tokens["border"],
@@ -479,8 +485,8 @@ class YouTubeDownloaderApp(ctk.CTk):
             font=ctk.CTkFont(family=FONT_FAMILY, size=11)
         )
         self.entry_dest.pack(side="left", fill="x", expand=True, padx=(0, 6))
-        self.entry_dest.insert(0, DEFAULT_SONGS)
-        self.entry_dest.bind("<FocusOut>", lambda _event: self.update_quick_pills())
+        self.entry_dest.insert(0, initial_dest)
+        self.entry_dest.bind("<FocusOut>", lambda _event: save_destination(self.entry_dest.get().strip()))
 
         ctk.CTkButton(
             dest_inner, text="BROWSE", width=74, height=36, corner_radius=4,
@@ -721,28 +727,32 @@ class YouTubeDownloaderApp(ctk.CTk):
         self.lbl_dm_empty.pack(pady=40)
 
     def open_current_destination(self):
-        p = self.entry_dest.get().strip() or DEFAULT_SONGS
-        if os.path.exists(p):
+        p = self.entry_dest.get().strip() or get_default_download_dir()
+        try:
+            os.makedirs(p, exist_ok=True)
             os.startfile(p)
-        else:
-            messagebox.showinfo("Notice", f"Folder does not exist yet:\n{p}")
+        except Exception:
+            messagebox.showinfo("Notice", f"Unable to open destination folder:\n{p}")
 
     def locate_file(self, filepath):
         if filepath and os.path.exists(filepath):
-            subprocess_dir = os.path.dirname(filepath)
-            os.startfile(subprocess_dir)
+            try:
+                subprocess_dir = os.path.dirname(filepath)
+                os.startfile(subprocess_dir)
+            except Exception:
+                self.open_current_destination()
         else:
             self.open_current_destination()
 
     def load_initial_downloads(self):
-        """Populate the download manager with existing recent downloads from destination folders."""
-        dest = DEFAULT_SONGS if os.path.exists(DEFAULT_SONGS) else EXE_DIR
+        """Populate the download manager with existing recent downloads from destination folder."""
+        dest = self.entry_dest.get().strip() or get_default_download_dir()
         try:
             if os.path.exists(dest):
                 files = [f for f in os.listdir(dest) if f.lower().endswith(('.mp3', '.m4a', '.mp4', '.mkv'))]
                 # Sort by modification time descending
                 files.sort(key=lambda f: os.path.getmtime(os.path.join(dest, f)), reverse=True)
-                for f in files[:12]:
+                for f in files[:15]:
                     full_p = os.path.join(dest, f)
                     fmt_tag = "MP4 Video" if f.lower().endswith(('.mp4', '.mkv')) else "MP3 Audio"
                     self.add_manager_item(f, f, "✓ Saved", fmt_tag, full_p)
@@ -796,17 +806,12 @@ class YouTubeDownloaderApp(ctk.CTk):
 
     def on_format_changed(self, choice):
         selected_code = self.all_formats.get(choice, "mp3_speaker")
-        current_dest = self.entry_dest.get().strip()
 
         if selected_code.startswith("video_"):
-            if current_dest.lower().endswith("songs"):
-                self.set_destination(DEFAULT_VIDEOS)
             self.lbl_format_hint.configure(
                 text=f"[SPEC] {selected_code.replace('video_', '').upper()} MP4 Video · Audio Muxed · FFmpeg Encoded"
             )
         else:
-            if current_dest.lower().endswith("videos"):
-                self.set_destination(DEFAULT_SONGS)
             if selected_code == "mp3_speaker":
                 self.lbl_format_hint.configure(
                     text="[SPEC] 128k Constant Bitrate · 44.1kHz Stereo · Stripped Artwork · FAT32 Clean Filenames"
@@ -820,35 +825,17 @@ class YouTubeDownloaderApp(ctk.CTk):
             self.update_analysis_meta(self.current_analysis)
 
     def set_destination(self, path):
+        norm_path = os.path.normpath(path)
         self.entry_dest.delete(0, "end")
-        self.entry_dest.insert(0, path)
-        self.update_quick_pills()
-        self.append_log(f"[DIR] Destination set: {path}")
-
-    def update_quick_pills(self):
-        curr = os.path.normpath(self.entry_dest.get().strip()).lower()
-        songs_norm = os.path.normpath(DEFAULT_SONGS).lower()
-        videos_norm = os.path.normpath(DEFAULT_VIDEOS).lower()
-        root_norm = os.path.normpath(DEFAULT_ROOT).lower()
-
-        self.btn_pill_songs.configure(
-            border_color=self.tokens["gold_border_bright"] if curr == songs_norm else self.tokens["border"],
-            text_color=self.tokens["gold_bright"] if curr == songs_norm else self.tokens["text_secondary"]
-        )
-        self.btn_pill_videos.configure(
-            border_color=self.tokens["gold_border_bright"] if curr == videos_norm else self.tokens["border"],
-            text_color=self.tokens["gold_bright"] if curr == videos_norm else self.tokens["text_secondary"]
-        )
-        self.btn_pill_root.configure(
-            border_color=self.tokens["gold_border_bright"] if curr == root_norm else self.tokens["border"],
-            text_color=self.tokens["gold_bright"] if curr == root_norm else self.tokens["text_secondary"]
-        )
+        self.entry_dest.insert(0, norm_path)
+        save_destination(norm_path)
+        self.append_log(f"[DIR] Destination set: {norm_path}")
 
     def browse_folder(self):
-        curr = self.entry_dest.get().strip() or DEFAULT_ROOT
+        curr = self.entry_dest.get().strip() or get_default_download_dir()
         selected = filedialog.askdirectory(initialdir=curr, title="Select Download Folder")
         if selected:
-            self.set_destination(os.path.normpath(selected))
+            self.set_destination(selected)
 
     def append_log(self, msg):
         self.log_queue.put(msg)
@@ -968,7 +955,8 @@ class YouTubeDownloaderApp(ctk.CTk):
 
         dest_dir = self.entry_dest.get().strip()
         if not dest_dir:
-            dest_dir = DEFAULT_SONGS
+            dest_dir = get_default_download_dir()
+        save_destination(dest_dir)
 
         chosen_label = self.combo_format.get()
         download_type = self.all_formats.get(chosen_label, "mp3_speaker")

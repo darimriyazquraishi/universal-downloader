@@ -45,7 +45,7 @@ def build():
     built_exe = os.path.join(dist_dir, "YouTube_Downloader.exe")
 
     if os.path.exists(built_exe):
-        workspace_exe = r"e:\deleteme\YouTube_Downloader.exe"
+        workspace_exe = os.path.join(os.path.dirname(app_dir), "YouTube_Downloader.exe")
         try:
             subprocess.run(["taskkill", "/f", "/im", "YouTube_Downloader.exe"], capture_output=True)
             shutil.copy2(built_exe, workspace_exe)
