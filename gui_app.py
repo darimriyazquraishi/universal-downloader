@@ -37,6 +37,9 @@ DEFAULT_SONGS = r"e:\deleteme\songs" if os.path.exists(r"e:\deleteme\songs") els
 DEFAULT_VIDEOS = r"e:\deleteme\videos" if os.path.exists(r"e:\deleteme\videos") else os.path.join(EXE_DIR, "videos")
 DEFAULT_ROOT = r"e:\deleteme" if os.path.exists(r"e:\deleteme") else EXE_DIR
 
+# Primary Font Configuration
+FONT_FAMILY = "Sebino Soft Regular"
+
 def clean_filename(title, idx, max_len=75):
     """Sanitize title for FAT32 USB/SD MP3 player compatibility (ASCII only)."""
     title = unicodedata.normalize('NFKD', title)
@@ -77,8 +80,8 @@ class YouTubeDownloaderApp(ctk.CTk):
         ctk.set_appearance_mode("Dark")
         ctk.set_default_color_theme("blue")
         self.title("YouTube Downloader")
-        self.geometry("1120x800")
-        self.minsize(980, 720)
+        self.geometry("1160x820")
+        self.minsize(1020, 720)
 
         # State Variables
         self.stop_event = threading.Event()
@@ -88,6 +91,9 @@ class YouTubeDownloaderApp(ctk.CTk):
         self.current_analysis = None
         self.is_downloading = False
         self.current_mode = "audio" # "audio" or "video"
+
+        # Download Manager items state
+        self.manager_items = {} # title -> dict(card_widget, status_lbl, path)
 
         # Format mappings
         self.audio_formats = {
@@ -106,7 +112,7 @@ class YouTubeDownloaderApp(ctk.CTk):
 
         # Build UI Components
         self.create_layout()
-        self.update_storage_info()
+        self.load_initial_downloads()
         self.poll_log_queue()
 
         # Handle clean exit
@@ -114,18 +120,18 @@ class YouTubeDownloaderApp(ctk.CTk):
 
     def create_layout(self):
         """
-        Watermelon UI Rich Design System:
-        - Zinc-950 obsidian background (#09090B)
-        - Crisp 1px slate borders (#27272A, #3F3F46)
-        - Signature Watermelon Ruby (#E11D48 / #F43F5E) & Emerald (#10B981) accents
-        - Watermelon Segmented Switcher ([ AUDIO ] / [ VIDEO ])
-        - Rich Media Inspection card with multi-badge metric chips
-        - 3-Column live telemetry HUD (Speed, ETA, Progress)
-        - Zero AI slop, no cartoonish puffiness, pure industrial polish
+        Luxurious Gold + Sebino Soft Design System:
+        - Primary typography: Sebino Soft Regular
+        - Color palette: Deep obsidian canvas (#09090B) with rich gold accents (#D4AF37, #E5C158)
+        - Absolutely no red colors anywhere
+        - Top header is clean and minimal (no engine online pill)
+        - Left sidebar is a dedicated Download Manager (active downloads & saved history)
+        - Quick destination selector in main panel
+        - 3-Column live telemetry HUD (Speed, ETA, Progress) in Gold
         """
         self.configure(fg_color="#09090B")
         self.grid_rowconfigure(0, weight=0) # Header
-        self.grid_rowconfigure(1, weight=1) # Main Workbench
+        self.grid_rowconfigure(1, weight=1) # Workbench
         self.grid_columnconfigure(0, weight=1)
 
         # Style Tokens
@@ -140,20 +146,22 @@ class YouTubeDownloaderApp(ctk.CTk):
             "text_primary": "#FAFAFA",
             "text_secondary": "#A1A1AA",
             "text_muted": "#71717A",
-            "watermelon_ruby": "#E11D48",
-            "watermelon_ruby_hover": "#F43F5E",
-            "watermelon_ruby_subtle": "#271219",
-            "watermelon_emerald": "#10B981",
-            "watermelon_emerald_hover": "#34D399",
-            "watermelon_emerald_subtle": "#0B261D",
-            "watermelon_cyan": "#06B6D4",
-            "watermelon_cyan_subtle": "#08252E",
-            "watermelon_amber": "#F59E0B",
-            "watermelon_amber_subtle": "#2B1E08",
+            # Luxurious Gold Accent Palette
+            "gold": "#D4AF37",
+            "gold_bright": "#E5C158",
+            "gold_hover": "#F0CE68",
+            "gold_dark": "#261F0E",
+            "gold_subtle": "#17140B",
+            "gold_border": "#63501E",
+            "gold_border_bright": "#D4AF37",
+            "gold_text_dark": "#0E0C06",
+            "emerald": "#10B981",
+            "cyan": "#06B6D4",
+            "amber": "#F59E0B",
             "pill_bg": "#16161D",
         }
 
-        # ---------------- 1. TOP HEADER (Hairline Border & Pill HUD) ----------------
+        # ---------------- 1. TOP HEADER (Clean, Minimal, No Engine Status) ----------------
         top_bar = ctk.CTkFrame(
             self, height=52, corner_radius=0,
             fg_color=self.tokens["bg"],
@@ -167,142 +175,114 @@ class YouTubeDownloaderApp(ctk.CTk):
         brand_frame = ctk.CTkFrame(top_bar, fg_color="transparent")
         brand_frame.grid(row=0, column=0, padx=18, pady=9, sticky="w")
 
-        # Watermelon Logo Badge
-        badge_icon = ctk.CTkLabel(
-            brand_frame, text="🍉",
-            font=ctk.CTkFont(size=14)
+        lbl_logo = ctk.CTkLabel(
+            brand_frame, text="⚡",
+            font=ctk.CTkFont(size=15)
         )
-        badge_icon.pack(side="left", padx=(0, 8))
+        lbl_logo.pack(side="left", padx=(0, 8))
 
         lbl_title = ctk.CTkLabel(
             brand_frame, text="YOUTUBE DOWNLOADER",
-            font=ctk.CTkFont(family="Consolas", size=13, weight="bold"),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=13, weight="bold"),
             text_color=self.tokens["text_primary"]
         )
         lbl_title.pack(side="left")
 
         lbl_tag = ctk.CTkLabel(
-            brand_frame, text=" · NATIVE ENGINE",
-            font=ctk.CTkFont(family="Consolas", size=10),
+            brand_frame, text="· NATIVE DESKTOP SUITE",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=10),
             text_color=self.tokens["text_muted"]
         )
-        lbl_tag.pack(side="left", padx=6)
+        lbl_tag.pack(side="left", padx=8)
 
-        # Status HUD (Right - Watermelon Pill Badge)
-        status_frame = ctk.CTkFrame(top_bar, fg_color="transparent")
-        status_frame.grid(row=0, column=2, padx=18, pady=9, sticky="e")
-
-        self.pill_header_status = ctk.CTkFrame(
-            status_frame, corner_radius=12,
-            fg_color=self.tokens["watermelon_emerald_subtle"],
-            border_width=1, border_color=self.tokens["watermelon_emerald"]
+        # Right side: Minimal version mark (Engine Online removed as requested)
+        lbl_ver = ctk.CTkLabel(
+            top_bar, text="v1.3.0",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=10),
+            text_color=self.tokens["text_muted"]
         )
-        self.pill_header_status.pack(side="right")
-
-        self.lbl_header_status = ctk.CTkLabel(
-            self.pill_header_status, text="● ENGINE ONLINE",
-            font=ctk.CTkFont(family="Consolas", size=11, weight="bold"),
-            text_color=self.tokens["watermelon_emerald"]
-        )
-        self.lbl_header_status.pack(padx=12, pady=3)
+        lbl_ver.grid(row=0, column=2, padx=18, pady=9, sticky="e")
 
         # ---------------- 2. WORKBENCH ----------------
         workbench = ctk.CTkFrame(self, corner_radius=0, fg_color=self.tokens["bg"])
         workbench.grid(row=1, column=0, sticky="nsew")
         workbench.grid_rowconfigure(0, weight=1)
-        workbench.grid_columnconfigure(0, weight=0) # Sidebar
+        workbench.grid_columnconfigure(0, weight=0) # Sidebar: Download Manager
         workbench.grid_columnconfigure(1, weight=1) # Main Viewport
 
-        # ---------------- LEFT SIDEBAR (Destinations & Telemetry) ----------------
+        # ---------------- LEFT SIDEBAR: DOWNLOAD MANAGER ----------------
         sidebar = ctk.CTkFrame(
-            workbench, width=230, corner_radius=0,
+            workbench, width=280, corner_radius=0,
             fg_color=self.tokens["sidebar"],
             border_width=1, border_color=self.tokens["border"]
         )
         sidebar.grid(row=0, column=0, sticky="nsew")
         sidebar.grid_propagate(False)
+        sidebar.grid_rowconfigure(1, weight=1)
+        sidebar.grid_columnconfigure(0, weight=1)
 
-        # Header Label
+        # Header for Download Manager
+        dm_header = ctk.CTkFrame(sidebar, fg_color="transparent")
+        dm_header.grid(row=0, column=0, sticky="ew", padx=14, pady=(16, 8))
+        dm_header.grid_columnconfigure(0, weight=1)
+
         ctk.CTkLabel(
-            sidebar, text="01 / DESTINATIONS",
-            font=ctk.CTkFont(family="Consolas", size=10, weight="bold"),
+            dm_header, text="DOWNLOAD MANAGER",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11, weight="bold"),
+            text_color=self.tokens["gold"]
+        ).grid(row=0, column=0, sticky="w")
+
+        self.lbl_dm_count = ctk.CTkLabel(
+            dm_header, text="0 items",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=10),
             text_color=self.tokens["text_muted"]
-        ).pack(anchor="w", padx=16, pady=(18, 8))
-
-        # Destination Nav Items (Watermelon interactive sidebar items)
-        self.btn_dest_songs = ctk.CTkButton(
-            sidebar, text="♫  songs", anchor="w", height=34, corner_radius=4,
-            font=ctk.CTkFont(family="Consolas", size=11),
-            fg_color=self.tokens["surface_elevated"], hover_color=self.tokens["surface_hover"],
-            border_width=1, border_color=self.tokens["border_strong"],
-            text_color=self.tokens["text_primary"],
-            command=lambda: self.set_destination(DEFAULT_SONGS)
         )
-        self.btn_dest_songs.pack(fill="x", padx=12, pady=3)
+        self.lbl_dm_count.grid(row=0, column=1, sticky="e")
 
-        self.btn_dest_videos = ctk.CTkButton(
-            sidebar, text="▣  videos", anchor="w", height=34, corner_radius=4,
-            font=ctk.CTkFont(family="Consolas", size=11),
-            fg_color="transparent", hover_color=self.tokens["surface_elevated"],
-            border_width=0, border_color=self.tokens["border"],
-            text_color=self.tokens["text_secondary"],
-            command=lambda: self.set_destination(DEFAULT_VIDEOS)
+        # Scrollable List of Downloads
+        self.scroll_manager = ctk.CTkScrollableFrame(
+            sidebar, corner_radius=0,
+            fg_color="transparent",
+            scrollbar_button_color=self.tokens["surface_elevated"],
+            scrollbar_button_hover_color=self.tokens["gold_dark"]
         )
-        self.btn_dest_videos.pack(fill="x", padx=12, pady=3)
+        self.scroll_manager.grid(row=1, column=0, sticky="nsew", padx=6, pady=4)
+        self.scroll_manager.grid_columnconfigure(0, weight=1)
 
-        self.btn_dest_root = ctk.CTkButton(
-            sidebar, text="⌂  root folder", anchor="w", height=34, corner_radius=4,
-            font=ctk.CTkFont(family="Consolas", size=11),
-            fg_color="transparent", hover_color=self.tokens["surface_elevated"],
-            border_width=0, border_color=self.tokens["border"],
-            text_color=self.tokens["text_secondary"],
-            command=lambda: self.set_destination(DEFAULT_ROOT)
+        # Empty State Label
+        self.lbl_dm_empty = ctk.CTkLabel(
+            self.scroll_manager, text="No active downloads yet.\nPaste a link to start downloading.",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=10),
+            text_color=self.tokens["text_muted"], justify="center"
         )
-        self.btn_dest_root.pack(fill="x", padx=12, pady=3)
+        self.lbl_dm_empty.pack(pady=40)
 
-        ctk.CTkButton(
-            sidebar, text="+  custom folder...", anchor="w", height=30, corner_radius=4,
-            font=ctk.CTkFont(family="Consolas", size=10),
-            fg_color="transparent", hover_color=self.tokens["surface_elevated"],
-            text_color=self.tokens["text_muted"],
-            border_width=1, border_color=self.tokens["border"],
-            command=self.browse_folder
-        ).pack(fill="x", padx=12, pady=(10, 4))
-
-        # Bottom System Telemetry (Watermelon Stats Widget)
-        telemetry = ctk.CTkFrame(
-            sidebar, corner_radius=6,
+        # Bottom Actions in Download Manager
+        dm_footer = ctk.CTkFrame(
+            sidebar, corner_radius=4,
             fg_color=self.tokens["surface"],
             border_width=1, border_color=self.tokens["border"]
         )
-        telemetry.pack(side="bottom", fill="x", padx=12, pady=16)
+        dm_footer.grid(row=2, column=0, sticky="ew", padx=12, pady=14)
 
-        ctk.CTkLabel(
-            telemetry, text="STORAGE & ENCODER",
-            font=ctk.CTkFont(family="Consolas", size=9, weight="bold"),
-            text_color=self.tokens["text_muted"]
-        ).pack(anchor="w", padx=12, pady=(10, 4))
-
-        self.lbl_free_space = ctk.CTkLabel(
-            telemetry, text="FREE: --",
-            font=ctk.CTkFont(family="Consolas", size=11, weight="bold"),
-            text_color=self.tokens["text_primary"], anchor="w"
+        btn_open_folder = ctk.CTkButton(
+            dm_footer, text="📁 OPEN DOWNLOADS", height=32, corner_radius=4,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=10, weight="bold"),
+            fg_color=self.tokens["gold_subtle"], hover_color=self.tokens["gold_dark"],
+            border_width=1, border_color=self.tokens["gold_border"],
+            text_color=self.tokens["gold_bright"],
+            command=self.open_current_destination
         )
-        self.lbl_free_space.pack(fill="x", padx=12, pady=1)
+        btn_open_folder.pack(fill="x", padx=8, pady=(8, 4))
 
-        self.lbl_drive = ctk.CTkLabel(
-            telemetry, text="DRIVE: --",
-            font=ctk.CTkFont(family="Consolas", size=10),
-            text_color=self.tokens["text_muted"], anchor="w"
+        btn_clear_dm = ctk.CTkButton(
+            dm_footer, text="CLEAR LIST", height=26, corner_radius=4,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=9),
+            fg_color="transparent", hover_color=self.tokens["surface_elevated"],
+            text_color=self.tokens["text_muted"],
+            command=self.clear_manager_list
         )
-        self.lbl_drive.pack(fill="x", padx=12, pady=1)
-
-        self.lbl_ffmpeg_status = ctk.CTkLabel(
-            telemetry, text="ENCODER: Ready",
-            font=ctk.CTkFont(family="Consolas", size=10),
-            text_color=self.tokens["watermelon_emerald"], anchor="w"
-        )
-        self.lbl_ffmpeg_status.pack(fill="x", padx=12, pady=(1, 10))
+        btn_clear_dm.pack(fill="x", padx=8, pady=(0, 8))
 
         # ---------------- MAIN CONTENT VIEWPORT ----------------
         main_viewport = ctk.CTkFrame(workbench, corner_radius=0, fg_color=self.tokens["bg"])
@@ -313,13 +293,13 @@ class YouTubeDownloaderApp(ctk.CTk):
 
         # --- UPPER CONTROLS SECTION ---
         controls_panel = ctk.CTkFrame(main_viewport, corner_radius=0, fg_color=self.tokens["bg"])
-        controls_panel.grid(row=0, column=0, sticky="ew", padx=24, pady=(16, 10))
+        controls_panel.grid(row=0, column=0, sticky="ew", padx=24, pady=(16, 8))
         controls_panel.grid_columnconfigure(0, weight=1)
 
         # 1. URL Input Block
         ctk.CTkLabel(
-            controls_panel, text="02 / SOURCE LINK",
-            font=ctk.CTkFont(family="Consolas", size=10, weight="bold"),
+            controls_panel, text="01 / SOURCE LINK",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=10, weight="bold"),
             text_color=self.tokens["text_muted"]
         ).pack(anchor="w", pady=(0, 6))
 
@@ -331,54 +311,53 @@ class YouTubeDownloaderApp(ctk.CTk):
             height=40, corner_radius=4,
             border_width=1, border_color=self.tokens["border"],
             fg_color=self.tokens["surface"], text_color=self.tokens["text_primary"],
-            placeholder_text_color="#52525B", font=ctk.CTkFont(size=12)
+            placeholder_text_color="#52525B", font=ctk.CTkFont(family=FONT_FAMILY, size=12)
         )
         self.entry_url.pack(side="left", fill="x", expand=True, padx=(0, 6))
         self.entry_url.bind("<Return>", lambda _event: self.trigger_analyze())
 
         ctk.CTkButton(
             url_row, text="PASTE", width=68, height=40, corner_radius=4,
-            font=ctk.CTkFont(family="Consolas", size=11, weight="bold"),
-            fg_color=self.tokens["surface_elevated"], hover_color=self.tokens["surface_hover"],
-            border_width=1, border_color=self.tokens["border"],
-            text_color=self.tokens["text_primary"], command=self.paste_from_clipboard
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11, weight="bold"),
+            fg_color=self.tokens["gold_subtle"], hover_color=self.tokens["gold_dark"],
+            border_width=1, border_color=self.tokens["gold_border"],
+            text_color=self.tokens["gold_bright"], command=self.paste_from_clipboard
         ).pack(side="left", padx=(0, 6))
 
         self.btn_analyze = ctk.CTkButton(
             url_row, text="INSPECT", width=90, height=40, corner_radius=4,
-            font=ctk.CTkFont(family="Consolas", size=11, weight="bold"),
-            fg_color=self.tokens["surface_elevated"], hover_color=self.tokens["surface_hover"],
-            border_width=1, border_color=self.tokens["border_strong"],
-            text_color=self.tokens["text_primary"], command=self.trigger_analyze
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11, weight="bold"),
+            fg_color=self.tokens["gold_subtle"], hover_color=self.tokens["gold_dark"],
+            border_width=1, border_color=self.tokens["gold_border_bright"],
+            text_color=self.tokens["gold_bright"], command=self.trigger_analyze
         )
         self.btn_analyze.pack(side="left")
 
-        # Watermelon Rich Media Inspection Card (Hidden until link inspected)
+        # Media Inspection Card (Revealed upon inspection)
         self.frame_analysis = ctk.CTkFrame(
             controls_panel, corner_radius=6,
             fg_color=self.tokens["surface"],
-            border_width=1, border_color=self.tokens["border_strong"]
+            border_width=1, border_color=self.tokens["gold_border"]
         )
         
-        # Inspection Card Header (Title & Media Tag)
         an_header = ctk.CTkFrame(self.frame_analysis, fg_color="transparent")
         an_header.pack(fill="x", padx=12, pady=(10, 6))
 
         self.lbl_an_badge = ctk.CTkLabel(
             an_header, text="▶ VERIFIED MEDIA",
-            font=ctk.CTkFont(family="Consolas", size=9, weight="bold"),
-            text_color=self.tokens["watermelon_emerald"]
+            font=ctk.CTkFont(family=FONT_FAMILY, size=9, weight="bold"),
+            text_color=self.tokens["gold"]
         )
         self.lbl_an_badge.pack(anchor="w")
 
         self.lbl_an_title = ctk.CTkLabel(
             an_header, text="",
-            font=ctk.CTkFont(size=13, weight="bold"),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=13, weight="bold"),
             text_color=self.tokens["text_primary"], anchor="w", justify="left", wraplength=780
         )
         self.lbl_an_title.pack(fill="x", pady=(2, 0))
 
-        # Inspection Metric Chips Container (Watermelon Multi-badge row)
+        # Inspection Metric Chips Container (Gold accented)
         self.chips_row = ctk.CTkFrame(self.frame_analysis, fg_color="transparent")
         self.chips_row.pack(fill="x", padx=12, pady=(0, 10))
 
@@ -389,17 +368,17 @@ class YouTubeDownloaderApp(ctk.CTk):
 
         self.frame_analysis.pack_forget()
 
-        # 2. Output Specification Block with Watermelon Segmented Switcher
+        # 2. Output Specification Block with Gold Segmented Switcher
         spec_header = ctk.CTkFrame(controls_panel, fg_color="transparent")
         spec_header.pack(fill="x", pady=(4, 6))
 
         ctk.CTkLabel(
-            spec_header, text="03 / OUTPUT SPECIFICATION",
-            font=ctk.CTkFont(family="Consolas", size=10, weight="bold"),
+            spec_header, text="02 / OUTPUT SPECIFICATION",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=10, weight="bold"),
             text_color=self.tokens["text_muted"]
         ).pack(side="left")
 
-        # Watermelon Segmented Switcher ([ ♫ AUDIO ] / [ 🎬 VIDEO ])
+        # Gold Segmented Switcher ([ ♫ AUDIO ] / [ 🎬 VIDEO ])
         segmented_switcher = ctk.CTkFrame(
             spec_header, corner_radius=4,
             fg_color=self.tokens["surface"],
@@ -408,16 +387,16 @@ class YouTubeDownloaderApp(ctk.CTk):
         segmented_switcher.pack(side="right")
 
         self.btn_mode_audio = ctk.CTkButton(
-            segmented_switcher, text="♫ AUDIO", width=74, height=26, corner_radius=3,
-            font=ctk.CTkFont(family="Consolas", size=10, weight="bold"),
-            fg_color=self.tokens["watermelon_ruby"], hover_color=self.tokens["watermelon_ruby_hover"],
-            text_color="#FFFFFF", command=lambda: self.switch_mode("audio")
+            segmented_switcher, text="♫ AUDIO", width=76, height=26, corner_radius=3,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=10, weight="bold"),
+            fg_color=self.tokens["gold"], hover_color=self.tokens["gold_hover"],
+            text_color=self.tokens["gold_text_dark"], command=lambda: self.switch_mode("audio")
         )
         self.btn_mode_audio.pack(side="left", padx=2, pady=2)
 
         self.btn_mode_video = ctk.CTkButton(
-            segmented_switcher, text="🎬 VIDEO", width=74, height=26, corner_radius=3,
-            font=ctk.CTkFont(family="Consolas", size=10, weight="bold"),
+            segmented_switcher, text="🎬 VIDEO", width=76, height=26, corner_radius=3,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=10, weight="bold"),
             fg_color="transparent", hover_color=self.tokens["surface_hover"],
             text_color=self.tokens["text_secondary"], command=lambda: self.switch_mode("video")
         )
@@ -431,89 +410,127 @@ class YouTubeDownloaderApp(ctk.CTk):
             fg_color=self.tokens["surface"],
             button_color=self.tokens["surface_elevated"], button_hover_color=self.tokens["surface_hover"],
             dropdown_fg_color=self.tokens["surface"], dropdown_hover_color=self.tokens["surface_elevated"],
-            text_color=self.tokens["text_primary"], font=ctk.CTkFont(size=12),
-            dropdown_font=ctk.CTkFont(size=11), command=self.on_format_changed
+            text_color=self.tokens["text_primary"], font=ctk.CTkFont(family=FONT_FAMILY, size=12),
+            dropdown_font=ctk.CTkFont(family=FONT_FAMILY, size=11), command=self.on_format_changed
         )
         self.combo_format.pack(fill="x", pady=(0, 4))
         self.combo_format.set("MP3 · Old Speaker / USB (128 kbps CBR, 44.1kHz, ID3v2.3)")
 
         self.lbl_format_hint = ctk.CTkLabel(
             controls_panel, text="[SPEC] 128k Constant Bitrate · 44.1kHz Stereo · Stripped Artwork · FAT32 Clean Filenames",
-            font=ctk.CTkFont(family="Consolas", size=10), text_color=self.tokens["text_muted"], anchor="w"
+            font=ctk.CTkFont(family=FONT_FAMILY, size=10), text_color=self.tokens["text_muted"], anchor="w"
         )
         self.lbl_format_hint.pack(fill="x", pady=(0, 10))
 
-        # 3. Parameters Row (Destination & Limits)
+        # 3. Parameters Row: Quick Destination Pills + Save Path + Limit
+        params_header = ctk.CTkFrame(controls_panel, fg_color="transparent")
+        params_header.pack(fill="x", pady=(0, 4))
+
+        ctk.CTkLabel(
+            params_header, text="03 / SAVE LOCATION & LIMITS",
+            font=ctk.CTkFont(family=FONT_FAMILY, size=10, weight="bold"),
+            text_color=self.tokens["text_muted"]
+        ).pack(side="left")
+
+        # Quick Destination Preset Pills
+        quick_dest_row = ctk.CTkFrame(params_header, fg_color="transparent")
+        quick_dest_row.pack(side="right")
+
+        self.btn_pill_songs = ctk.CTkButton(
+            quick_dest_row, text="♫ songs", width=62, height=22, corner_radius=3,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=9),
+            fg_color=self.tokens["surface_elevated"], hover_color=self.tokens["gold_dark"],
+            border_width=1, border_color=self.tokens["gold_border"],
+            text_color=self.tokens["gold_bright"], command=lambda: self.set_destination(DEFAULT_SONGS)
+        )
+        self.btn_pill_songs.pack(side="left", padx=2)
+
+        self.btn_pill_videos = ctk.CTkButton(
+            quick_dest_row, text="▣ videos", width=62, height=22, corner_radius=3,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=9),
+            fg_color=self.tokens["surface_elevated"], hover_color=self.tokens["gold_dark"],
+            border_width=1, border_color=self.tokens["border"],
+            text_color=self.tokens["text_secondary"], command=lambda: self.set_destination(DEFAULT_VIDEOS)
+        )
+        self.btn_pill_videos.pack(side="left", padx=2)
+
+        self.btn_pill_root = ctk.CTkButton(
+            quick_dest_row, text="⌂ root", width=52, height=22, corner_radius=3,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=9),
+            fg_color=self.tokens["surface_elevated"], hover_color=self.tokens["gold_dark"],
+            border_width=1, border_color=self.tokens["border"],
+            text_color=self.tokens["text_secondary"], command=lambda: self.set_destination(DEFAULT_ROOT)
+        )
+        self.btn_pill_root.pack(side="left", padx=2)
+
+        # Path input and limit row
         params_row = ctk.CTkFrame(controls_panel, fg_color="transparent")
         params_row.pack(fill="x", pady=(0, 10))
         params_row.grid_columnconfigure(0, weight=3)
         params_row.grid_columnconfigure(1, weight=1)
 
-        ctk.CTkLabel(params_row, text="SAVE PATH", font=ctk.CTkFont(family="Consolas", size=9, weight="bold"), text_color=self.tokens["text_muted"]).grid(row=0, column=0, sticky="w", pady=(0, 4))
-        ctk.CTkLabel(params_row, text="ITEM LIMIT", font=ctk.CTkFont(family="Consolas", size=9, weight="bold"), text_color=self.tokens["text_muted"]).grid(row=0, column=1, sticky="w", padx=(10, 0), pady=(0, 4))
-
         dest_inner = ctk.CTkFrame(params_row, fg_color="transparent")
-        dest_inner.grid(row=1, column=0, sticky="ew", padx=(0, 10))
+        dest_inner.grid(row=0, column=0, sticky="ew", padx=(0, 10))
 
         self.entry_dest = ctk.CTkEntry(
             dest_inner, height=36, corner_radius=4,
             border_width=1, border_color=self.tokens["border"],
             fg_color=self.tokens["surface"], text_color=self.tokens["text_primary"],
-            font=ctk.CTkFont(family="Consolas", size=11)
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11)
         )
         self.entry_dest.pack(side="left", fill="x", expand=True, padx=(0, 6))
         self.entry_dest.insert(0, DEFAULT_SONGS)
-        self.entry_dest.bind("<FocusOut>", lambda _event: (self.update_storage_info(), self.update_sidebar_selection()))
+        self.entry_dest.bind("<FocusOut>", lambda _event: self.update_quick_pills())
 
         ctk.CTkButton(
             dest_inner, text="BROWSE", width=74, height=36, corner_radius=4,
-            font=ctk.CTkFont(family="Consolas", size=10, weight="bold"),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=10, weight="bold"),
             fg_color=self.tokens["surface_elevated"], hover_color=self.tokens["surface_hover"],
             border_width=1, border_color=self.tokens["border"],
             text_color=self.tokens["text_primary"], command=self.browse_folder
         ).pack(side="left")
 
         self.entry_limit = ctk.CTkEntry(
-            params_row, placeholder_text="All items", height=36, corner_radius=4,
+            params_row, placeholder_text="Item limit (optional)", height=36, corner_radius=4,
             border_width=1, border_color=self.tokens["border"],
             fg_color=self.tokens["surface"], text_color=self.tokens["text_primary"],
-            placeholder_text_color="#52525B", font=ctk.CTkFont(family="Consolas", size=11)
+            placeholder_text_color="#52525B", font=ctk.CTkFont(family=FONT_FAMILY, size=11)
         )
-        self.entry_limit.grid(row=1, column=1, sticky="ew", padx=(10, 0))
+        self.entry_limit.grid(row=0, column=1, sticky="ew")
 
         # Checkbox: Skip duplicates
         self.var_ignore_dups = ctk.BooleanVar(value=True)
         self.chk_dups = ctk.CTkCheckBox(
             controls_panel, text="Skip files already present in destination folder",
             variable=self.var_ignore_dups, corner_radius=3,
-            font=ctk.CTkFont(size=11), text_color=self.tokens["text_secondary"],
-            fg_color=self.tokens["watermelon_ruby"], hover_color=self.tokens["watermelon_ruby_hover"],
-            checkmark_color="#FFFFFF", border_color=self.tokens["border_strong"]
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11), text_color=self.tokens["text_secondary"],
+            fg_color=self.tokens["gold"], hover_color=self.tokens["gold_hover"],
+            checkmark_color=self.tokens["gold_text_dark"], border_color=self.tokens["border_strong"]
         )
         self.chk_dups.pack(anchor="w", pady=(0, 14))
 
-        # 4. Action Row (Watermelon Signature Ruby CTA & Dark Rose Stop)
+        # 4. Action Row (Gold CTA & Subtle Dark Gold Stop Button)
         action_row = ctk.CTkFrame(controls_panel, fg_color="transparent")
         action_row.pack(fill="x", pady=(0, 4))
 
         self.btn_download = ctk.CTkButton(
             action_row, text="START DOWNLOAD", height=44, corner_radius=5,
-            font=ctk.CTkFont(family="Consolas", size=12, weight="bold"),
-            fg_color=self.tokens["watermelon_ruby"], hover_color=self.tokens["watermelon_ruby_hover"],
-            text_color="#FFFFFF", command=self.start_download
+            font=ctk.CTkFont(family=FONT_FAMILY, size=12, weight="bold"),
+            fg_color=self.tokens["gold"], hover_color=self.tokens["gold_hover"],
+            text_color=self.tokens["gold_text_dark"], command=self.start_download
         )
         self.btn_download.pack(side="left", fill="x", expand=True, padx=(0, 8))
 
         self.btn_stop = ctk.CTkButton(
             action_row, text="STOP", width=90, height=44, corner_radius=5,
-            font=ctk.CTkFont(family="Consolas", size=11, weight="bold"),
-            fg_color=self.tokens["watermelon_ruby_subtle"], hover_color="#3D1823",
-            border_width=1, border_color=self.tokens["watermelon_ruby"],
-            text_color=self.tokens["watermelon_ruby_hover"], state="disabled", command=self.stop_download
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11, weight="bold"),
+            fg_color=self.tokens["gold_subtle"], hover_color=self.tokens["gold_dark"],
+            border_width=1, border_color=self.tokens["gold_border"],
+            text_color=self.tokens["gold_bright"], state="disabled", command=self.stop_download
         )
         self.btn_stop.pack(side="left")
 
-        # --- LOWER ACTIVITY & TELEMETRY SECTION (Watermelon Dashboard Panel) ---
+        # --- LOWER ACTIVITY & TELEMETRY SECTION ---
         term_frame = ctk.CTkFrame(
             main_viewport, corner_radius=6,
             fg_color=self.tokens["bg"],
@@ -523,7 +540,7 @@ class YouTubeDownloaderApp(ctk.CTk):
         term_frame.grid_columnconfigure(0, weight=1)
         term_frame.grid_rowconfigure(2, weight=1)
 
-        # 3-Stat Live Telemetry Header (Speed, ETA, Progress in Watermelon Tiles)
+        # 3-Stat Live Telemetry Header (Speed, ETA, Progress in Gold)
         telemetry_strip = ctk.CTkFrame(term_frame, fg_color=self.tokens["surface"], height=42, corner_radius=0)
         telemetry_strip.grid(row=0, column=0, sticky="ew")
         telemetry_strip.grid_columnconfigure(0, weight=2)
@@ -533,36 +550,36 @@ class YouTubeDownloaderApp(ctk.CTk):
 
         self.lbl_progress_status = ctk.CTkLabel(
             telemetry_strip, text="Ready to download",
-            font=ctk.CTkFont(family="Consolas", size=11, weight="bold"),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11, weight="bold"),
             text_color=self.tokens["text_primary"]
         )
         self.lbl_progress_status.grid(row=0, column=0, sticky="w", padx=14, pady=10)
 
         self.lbl_hud_speed = ctk.CTkLabel(
             telemetry_strip, text="SPEED: --",
-            font=ctk.CTkFont(family="Consolas", size=10, weight="bold"),
-            text_color=self.tokens["watermelon_cyan"]
+            font=ctk.CTkFont(family=FONT_FAMILY, size=10, weight="bold"),
+            text_color=self.tokens["gold_bright"]
         )
         self.lbl_hud_speed.grid(row=0, column=1, sticky="e", padx=10, pady=10)
 
         self.lbl_hud_eta = ctk.CTkLabel(
             telemetry_strip, text="ETA: --",
-            font=ctk.CTkFont(family="Consolas", size=10, weight="bold"),
-            text_color=self.tokens["watermelon_amber"]
+            font=ctk.CTkFont(family=FONT_FAMILY, size=10, weight="bold"),
+            text_color=self.tokens["gold_bright"]
         )
         self.lbl_hud_eta.grid(row=0, column=2, sticky="e", padx=10, pady=10)
 
         self.lbl_progress_meta = ctk.CTkLabel(
             telemetry_strip, text="0%",
-            font=ctk.CTkFont(family="Consolas", size=11, weight="bold"),
-            text_color=self.tokens["watermelon_emerald"]
+            font=ctk.CTkFont(family=FONT_FAMILY, size=11, weight="bold"),
+            text_color=self.tokens["gold"]
         )
         self.lbl_progress_meta.grid(row=0, column=3, sticky="e", padx=14, pady=10)
 
-        # Clean Watermelon Progress Bar
+        # Gold Progress Bar
         self.progress_bar = ctk.CTkProgressBar(
             term_frame, height=4, corner_radius=0,
-            progress_color=self.tokens["watermelon_emerald"], fg_color=self.tokens["border"]
+            progress_color=self.tokens["gold"], fg_color=self.tokens["border"]
         )
         self.progress_bar.grid(row=1, column=0, sticky="ew")
         self.progress_bar.set(0)
@@ -579,13 +596,13 @@ class YouTubeDownloaderApp(ctk.CTk):
 
         ctk.CTkLabel(
             console_toolbar, text="ACTIVITY LOG",
-            font=ctk.CTkFont(family="Consolas", size=9, weight="bold"),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=9, weight="bold"),
             text_color=self.tokens["text_muted"]
         ).grid(row=0, column=0, sticky="w")
 
         ctk.CTkButton(
             console_toolbar, text="[CLEAR]", width=48, height=20, corner_radius=2,
-            font=ctk.CTkFont(family="Consolas", size=9),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=9),
             fg_color="transparent", hover_color=self.tokens["surface_elevated"],
             text_color=self.tokens["text_muted"], command=self.clear_logs
         ).grid(row=0, column=1, sticky="e")
@@ -602,7 +619,7 @@ class YouTubeDownloaderApp(ctk.CTk):
         self.append_log("[SYS] Paste a YouTube link above, choose format, and click START DOWNLOAD.")
 
     def create_metric_pill(self, parent, label, initial_val):
-        """Helper to create a Watermelon-style metric badge pill."""
+        """Helper to create a Gold-accented metric badge pill."""
         pill = ctk.CTkFrame(
             parent, corner_radius=4,
             fg_color=self.tokens["pill_bg"],
@@ -612,28 +629,136 @@ class YouTubeDownloaderApp(ctk.CTk):
 
         ctk.CTkLabel(
             pill, text=label,
-            font=ctk.CTkFont(family="Consolas", size=8, weight="bold"),
-            text_color=self.tokens["text_muted"]
+            font=ctk.CTkFont(family=FONT_FAMILY, size=8, weight="bold"),
+            text_color=self.tokens["gold"]
         ).pack(side="left", padx=(8, 4), pady=3)
 
         val_lbl = ctk.CTkLabel(
             pill, text=initial_val,
-            font=ctk.CTkFont(family="Consolas", size=10, weight="bold"),
+            font=ctk.CTkFont(family=FONT_FAMILY, size=10, weight="bold"),
             text_color=self.tokens["text_primary"]
         )
         val_lbl.pack(side="left", padx=(0, 8), pady=3)
         return val_lbl
 
+    # ---------------- Download Manager Methods ----------------
+
+    def add_manager_item(self, item_id, title, status_text, format_label="", filepath=None):
+        """Add or update an item in the sidebar Download Manager list."""
+        if hasattr(self, 'lbl_dm_empty') and self.lbl_dm_empty.winfo_exists():
+            self.lbl_dm_empty.pack_forget()
+
+        if item_id in self.manager_items:
+            data = self.manager_items[item_id]
+            data["status_lbl"].configure(text=status_text)
+            if "Saved" in status_text or "Done" in status_text:
+                data["status_lbl"].configure(text_color=self.tokens["gold_bright"])
+            elif "Downloading" in status_text:
+                data["status_lbl"].configure(text_color=self.tokens["gold"])
+            else:
+                data["status_lbl"].configure(text_color=self.tokens["text_muted"])
+            if filepath:
+                data["path"] = filepath
+            return
+
+        # Create card widget
+        card = ctk.CTkFrame(
+            self.scroll_manager, corner_radius=4,
+            fg_color=self.tokens["surface"],
+            border_width=1, border_color=self.tokens["border"]
+        )
+        card.pack(fill="x", padx=4, pady=3)
+
+        # Title
+        t_short = title if len(title) <= 32 else title[:30] + "..."
+        lbl_t = ctk.CTkLabel(
+            card, text=t_short,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=10, weight="bold"),
+            text_color=self.tokens["text_primary"], anchor="w"
+        )
+        lbl_t.pack(fill="x", padx=8, pady=(6, 2))
+
+        # Bottom row: Format + Status
+        row = ctk.CTkFrame(card, fg_color="transparent")
+        row.pack(fill="x", padx=8, pady=(0, 6))
+
+        fmt_short = format_label.split("·")[0].strip() if "·" in format_label else (format_label[:14] if format_label else "Audio")
+        ctk.CTkLabel(
+            row, text=fmt_short,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=8),
+            text_color=self.tokens["text_muted"], anchor="w"
+        ).pack(side="left")
+
+        status_color = self.tokens["gold_bright"] if "Saved" in status_text else self.tokens["gold"]
+        lbl_status = ctk.CTkLabel(
+            row, text=status_text,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=8, weight="bold"),
+            text_color=status_color, anchor="e"
+        )
+        lbl_status.pack(side="right")
+
+        # Double click to open folder/file
+        card.bind("<Double-Button-1>", lambda _e, p=filepath: self.locate_file(p))
+        lbl_t.bind("<Double-Button-1>", lambda _e, p=filepath: self.locate_file(p))
+
+        self.manager_items[item_id] = {
+            "card": card,
+            "status_lbl": lbl_status,
+            "path": filepath
+        }
+
+        self.update_manager_count()
+
+    def update_manager_count(self):
+        count = len(self.manager_items)
+        self.lbl_dm_count.configure(text=f"{count} items")
+
+    def clear_manager_list(self):
+        for data in self.manager_items.values():
+            data["card"].destroy()
+        self.manager_items.clear()
+        self.lbl_dm_count.configure(text="0 items")
+        self.lbl_dm_empty.pack(pady=40)
+
+    def open_current_destination(self):
+        p = self.entry_dest.get().strip() or DEFAULT_SONGS
+        if os.path.exists(p):
+            os.startfile(p)
+        else:
+            messagebox.showinfo("Notice", f"Folder does not exist yet:\n{p}")
+
+    def locate_file(self, filepath):
+        if filepath and os.path.exists(filepath):
+            subprocess_dir = os.path.dirname(filepath)
+            os.startfile(subprocess_dir)
+        else:
+            self.open_current_destination()
+
+    def load_initial_downloads(self):
+        """Populate the download manager with existing recent downloads from destination folders."""
+        dest = DEFAULT_SONGS if os.path.exists(DEFAULT_SONGS) else EXE_DIR
+        try:
+            if os.path.exists(dest):
+                files = [f for f in os.listdir(dest) if f.lower().endswith(('.mp3', '.m4a', '.mp4', '.mkv'))]
+                # Sort by modification time descending
+                files.sort(key=lambda f: os.path.getmtime(os.path.join(dest, f)), reverse=True)
+                for f in files[:12]:
+                    full_p = os.path.join(dest, f)
+                    fmt_tag = "MP4 Video" if f.lower().endswith(('.mp4', '.mkv')) else "MP3 Audio"
+                    self.add_manager_item(f, f, "✓ Saved", fmt_tag, full_p)
+        except Exception:
+            pass
+
     # ---------------- UI Event Handlers ----------------
 
     def switch_mode(self, mode):
-        """Toggle between Audio and Video mode via Watermelon segmented pills."""
+        """Toggle between Audio and Video mode via Gold segmented pills."""
         self.current_mode = mode
         if mode == "audio":
             self.btn_mode_audio.configure(
-                fg_color=self.tokens["watermelon_ruby"],
-                hover_color=self.tokens["watermelon_ruby_hover"],
-                text_color="#FFFFFF"
+                fg_color=self.tokens["gold"],
+                hover_color=self.tokens["gold_hover"],
+                text_color=self.tokens["gold_text_dark"]
             )
             self.btn_mode_video.configure(
                 fg_color="transparent",
@@ -645,9 +770,9 @@ class YouTubeDownloaderApp(ctk.CTk):
             self.on_format_changed("MP3 · Old Speaker / USB (128 kbps CBR, 44.1kHz, ID3v2.3)")
         else:
             self.btn_mode_video.configure(
-                fg_color=self.tokens["watermelon_ruby"],
-                hover_color=self.tokens["watermelon_ruby_hover"],
-                text_color="#FFFFFF"
+                fg_color=self.tokens["gold"],
+                hover_color=self.tokens["gold_hover"],
+                text_color=self.tokens["gold_text_dark"]
             )
             self.btn_mode_audio.configure(
                 fg_color="transparent",
@@ -697,34 +822,26 @@ class YouTubeDownloaderApp(ctk.CTk):
     def set_destination(self, path):
         self.entry_dest.delete(0, "end")
         self.entry_dest.insert(0, path)
-        self.update_storage_info()
-        self.update_sidebar_selection()
-        self.append_log(f"[DIR] Destination: {path}")
+        self.update_quick_pills()
+        self.append_log(f"[DIR] Destination set: {path}")
 
-    def update_sidebar_selection(self):
+    def update_quick_pills(self):
         curr = os.path.normpath(self.entry_dest.get().strip()).lower()
         songs_norm = os.path.normpath(DEFAULT_SONGS).lower()
         videos_norm = os.path.normpath(DEFAULT_VIDEOS).lower()
         root_norm = os.path.normpath(DEFAULT_ROOT).lower()
 
-        # Watermelon active sidebar style
-        self.btn_dest_songs.configure(
-            fg_color=self.tokens["surface_elevated"] if curr == songs_norm else "transparent",
-            border_width=1 if curr == songs_norm else 0,
-            border_color=self.tokens["border_strong"] if curr == songs_norm else self.tokens["border"],
-            text_color=self.tokens["text_primary"] if curr == songs_norm else self.tokens["text_secondary"]
+        self.btn_pill_songs.configure(
+            border_color=self.tokens["gold_border_bright"] if curr == songs_norm else self.tokens["border"],
+            text_color=self.tokens["gold_bright"] if curr == songs_norm else self.tokens["text_secondary"]
         )
-        self.btn_dest_videos.configure(
-            fg_color=self.tokens["surface_elevated"] if curr == videos_norm else "transparent",
-            border_width=1 if curr == videos_norm else 0,
-            border_color=self.tokens["border_strong"] if curr == videos_norm else self.tokens["border"],
-            text_color=self.tokens["text_primary"] if curr == videos_norm else self.tokens["text_secondary"]
+        self.btn_pill_videos.configure(
+            border_color=self.tokens["gold_border_bright"] if curr == videos_norm else self.tokens["border"],
+            text_color=self.tokens["gold_bright"] if curr == videos_norm else self.tokens["text_secondary"]
         )
-        self.btn_dest_root.configure(
-            fg_color=self.tokens["surface_elevated"] if curr == root_norm else "transparent",
-            border_width=1 if curr == root_norm else 0,
-            border_color=self.tokens["border_strong"] if curr == root_norm else self.tokens["border"],
-            text_color=self.tokens["text_primary"] if curr == root_norm else self.tokens["text_secondary"]
+        self.btn_pill_root.configure(
+            border_color=self.tokens["gold_border_bright"] if curr == root_norm else self.tokens["border"],
+            text_color=self.tokens["gold_bright"] if curr == root_norm else self.tokens["text_secondary"]
         )
 
     def browse_folder(self):
@@ -732,22 +849,6 @@ class YouTubeDownloaderApp(ctk.CTk):
         selected = filedialog.askdirectory(initialdir=curr, title="Select Download Folder")
         if selected:
             self.set_destination(os.path.normpath(selected))
-
-    def update_storage_info(self):
-        try:
-            target_path = self.entry_dest.get().strip() or DEFAULT_ROOT
-            drive = os.path.splitdrive(target_path)[0] or "C:"
-            total, used, free = shutil.disk_usage(drive)
-            free_gb = free / (1024**3)
-            self.lbl_free_space.configure(text=f"FREE: {free_gb:.1f} GB")
-            self.lbl_drive.configure(text=f"DRIVE: {drive}")
-        except Exception:
-            pass
-
-        if FFMPEG_EXE and os.path.exists(FFMPEG_EXE):
-            self.lbl_ffmpeg_status.configure(text="ENCODER: FFmpeg Ready", text_color=self.tokens["watermelon_emerald"])
-        else:
-            self.lbl_ffmpeg_status.configure(text="ENCODER: Not Found", text_color=self.tokens["watermelon_ruby"])
 
     def append_log(self, msg):
         self.log_queue.put(msg)
@@ -773,7 +874,6 @@ class YouTubeDownloaderApp(ctk.CTk):
             return
 
         self.btn_analyze.configure(state="disabled", text="CHECKING")
-        self.set_header_status("● ANALYZING", self.tokens["watermelon_cyan"], self.tokens["watermelon_cyan_subtle"])
         self.append_log(f"[GET] Inspecting link: {url}")
 
         def worker():
@@ -813,14 +913,9 @@ class YouTubeDownloaderApp(ctk.CTk):
                 "total_duration": total_dur
             }
 
-    def set_header_status(self, text, fg_color, bg_color):
-        self.lbl_header_status.configure(text=text, text_color=fg_color)
-        self.pill_header_status.configure(fg_color=bg_color, border_color=fg_color)
-
     def on_analysis_success(self, res):
         self.current_analysis = res
         self.btn_analyze.configure(state="normal", text="INSPECT")
-        self.set_header_status("● READY", self.tokens["watermelon_emerald"], self.tokens["watermelon_emerald_subtle"])
         self.frame_analysis.pack(fill="x", pady=(0, 10))
         self.update_analysis_meta(res)
         self.append_log(f"[OK] Link verified: '{res['title']}' ({res['track_count']} items, {res['duration_str']})")
@@ -861,7 +956,6 @@ class YouTubeDownloaderApp(ctk.CTk):
 
     def on_analysis_error(self, err):
         self.btn_analyze.configure(state="normal", text="INSPECT")
-        self.set_header_status("● ERROR", self.tokens["watermelon_ruby"], self.tokens["watermelon_ruby_subtle"])
         self.append_log(f"[ERR] Inspection failed: {err}")
 
     # ---------------- Download Engine ----------------
@@ -889,7 +983,6 @@ class YouTubeDownloaderApp(ctk.CTk):
         self.stop_event.clear()
         self.btn_download.configure(state="disabled")
         self.btn_stop.configure(state="normal")
-        self.set_header_status("● DOWNLOADING", self.tokens["watermelon_amber"], self.tokens["watermelon_amber_subtle"])
         self.progress_bar.set(0)
         self.lbl_progress_status.configure(text="Initializing download queue...")
         self.lbl_hud_speed.configure(text="SPEED: --")
@@ -901,7 +994,8 @@ class YouTubeDownloaderApp(ctk.CTk):
             "dest_dir": dest_dir,
             "download_type": download_type,
             "ignore_dups": ignore_dups,
-            "max_tracks": max_tracks
+            "max_tracks": max_tracks,
+            "format_label": chosen_label
         }
 
         self.download_thread = threading.Thread(target=self.run_download_worker, args=(params,), daemon=True)
@@ -919,6 +1013,7 @@ class YouTubeDownloaderApp(ctk.CTk):
         download_type = params["download_type"]
         ignore_dups = params["ignore_dups"]
         max_tracks = params["max_tracks"]
+        format_label = params.get("format_label", "")
 
         os.makedirs(dest_dir, exist_ok=True)
 
@@ -1017,7 +1112,12 @@ class YouTubeDownloaderApp(ctk.CTk):
             current_idx = i + 1
             track_num = start_num + i
             cleaned = clean_filename(item['title'], track_num)
+            ext_target = "mp4" if is_video else ("m4a" if download_type == "m4a" else "mp3")
             filename_base = f"{track_num:03d} - {cleaned}"
+            full_target_path = os.path.join(dest_dir, f"{filename_base}.{ext_target}")
+
+            # Register in Download Manager
+            self.after(0, lambda name=filename_base, fmt=format_label: self.add_manager_item(name, name, "⏳ Downloading...", fmt))
 
             self.after(0, lambda n=current_idx, t=total_queue, name=item['title']: self.lbl_progress_status.configure(
                 text=f"[{n}/{t}] Processing: {name[:55]}"
@@ -1071,10 +1171,14 @@ class YouTubeDownloaderApp(ctk.CTk):
                     ydl.download([f"https://www.youtube.com/watch?v={item['id']}"])
                 downloaded_count += 1
                 self.append_log(f"[OK] Saved: {filename_base}")
+                # Mark Done in Download Manager
+                self.after(0, lambda name=filename_base, p=full_target_path: self.add_manager_item(name, name, "✓ Saved", format_label, p))
             except Exception as e:
                 if self.stop_event.is_set():
+                    self.after(0, lambda name=filename_base: self.add_manager_item(name, name, "✕ Stopped", format_label))
                     break
                 self.append_log(f"[ERR] Download error ({item['title']}): {e}")
+                self.after(0, lambda name=filename_base: self.add_manager_item(name, name, "✕ Failed", format_label))
 
         self.append_log(f"[DONE] Completed. Downloaded {downloaded_count} items.")
         self.after(0, self.finish_download)
@@ -1091,13 +1195,11 @@ class YouTubeDownloaderApp(ctk.CTk):
         self.is_downloading = False
         self.btn_download.configure(state="normal")
         self.btn_stop.configure(state="disabled")
-        self.set_header_status("● ENGINE ONLINE", self.tokens["watermelon_emerald"], self.tokens["watermelon_emerald_subtle"])
         self.lbl_progress_status.configure(text="Ready to download")
         self.progress_bar.set(1.0)
         self.lbl_progress_meta.configure(text="100%")
         self.lbl_hud_speed.configure(text="SPEED: --")
         self.lbl_hud_eta.configure(text="ETA: --")
-        self.update_storage_info()
 
     def on_closing(self):
         if self.is_downloading:
