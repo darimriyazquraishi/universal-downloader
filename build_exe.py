@@ -18,14 +18,16 @@ def build():
     cmd = [
         sys.executable, "-m", "PyInstaller",
         "--onefile",
+        "--noconsole",
         "--name=YouTube_Downloader",
-        "--add-data=static;static",
         "--add-binary=ffmpeg.exe;.",
+        "--collect-all=customtkinter",
         "--collect-all=yt_dlp",
+        "--hidden-import=darkdetect",
         "--hidden-import=imageio_ffmpeg",
         "--clean",
         "--noconfirm",
-        "server.py"
+        "gui_app.py"
     ]
 
     print("Running command:", " ".join(cmd))
@@ -38,13 +40,20 @@ def build():
     final_dest = r"e:\deleteme\YouTube_Downloader.exe"
 
     if os.path.exists(built_exe):
+        # Kill any running instance of YouTube_Downloader.exe if currently open
+        try:
+            subprocess.run(["taskkill", "/f", "/im", "YouTube_Downloader.exe"], capture_output=True)
+        except Exception:
+            pass
+
         shutil.copy2(built_exe, final_dest)
         size_mb = os.path.getsize(final_dest) / (1024 * 1024)
         print(f"\n=======================================================")
-        print(f" SUCCESS: One-File Standalone Executable Created!")
+        print(f" SUCCESS: Native Desktop Windows EXE Created!")
         print(f" Location: {final_dest}")
         print(f" Size: {size_mb:.1f} MB")
-        print(f" Bundled: Server + UI + yt-dlp + FFmpeg 7.1")
+        print(f" Bundled: Native Dark GUI + yt-dlp + FFmpeg 7.1")
+        print(f" Zero Browser Involvement: Pure Native Desktop Window")
         print(f"=======================================================\n")
     else:
         print(f"[ERROR] Could not find built exe at: {built_exe}")
