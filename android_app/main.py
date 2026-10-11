@@ -21,6 +21,8 @@ from kivy.core.window import Window
 from kivy.core.text import LabelBase
 from kivy.clock import Clock
 from kivy.graphics import Color, RoundedRectangle, Line, Rectangle, Ellipse
+from kivy.animation import Animation
+from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.anchorlayout import AnchorLayout
 from kivy.uix.scrollview import ScrollView
@@ -133,16 +135,96 @@ class CardBox(BoxLayout):
         self.rect_border.rounded_rectangle = (self.pos[0], self.pos[1], self.size[0], self.size[1], self.radius)
 
 
+class TooltipToast(BoxLayout):
+    """Floating premium gold-accented tooltip HUD toast."""
+    def __init__(self, **kwargs):
+        kwargs['size_hint'] = (None, None)
+        super().__init__(**kwargs)
+        self.orientation = "horizontal"
+        self.padding = [14, 8]
+        self.spacing = 10
+        self.opacity = 0
+        self.height = 46
+        self.width = 360
+        self.auto_dismiss_event = None
+
+        with self.canvas.before:
+            Color(0.08, 0.08, 0.12, 0.96)
+            self.rect_bg = RoundedRectangle(pos=self.pos, size=self.size, radius=[12])
+            Color(*COLOR_GOLD)
+            self.rect_border = Line(rounded_rectangle=(self.pos[0], self.pos[1], self.size[0], self.size[1], 12), width=1.3)
+        self.bind(pos=self._update_canvas, size=self._update_canvas)
+
+        self.lbl_badge = Label(
+            text="INFO",
+            font_name=FONT_FAMILY,
+            font_size="10.5sp",
+            bold=True,
+            color=COLOR_GOLD,
+            size_hint_x=None,
+            width=36
+        )
+        self.lbl_text = Label(
+            text="",
+            font_name=FONT_FAMILY,
+            font_size="11.5sp",
+            color=COLOR_TEXT_WHITE,
+            halign="left",
+            valign="middle"
+        )
+        self.lbl_text.bind(size=self.lbl_text.setter('text_size'))
+        self.add_widget(self.lbl_badge)
+        self.add_widget(self.lbl_text)
+
+    def _update_canvas(self, *args):
+        self.rect_bg.pos = self.pos
+        self.rect_bg.size = self.size
+        self.rect_border.rounded_rectangle = (self.pos[0], self.pos[1], self.size[0], self.size[1], 12)
+
+    def show(self, text, duration=3.5):
+        if not text:
+            return
+        if self.auto_dismiss_event:
+            Clock.unschedule(self.auto_dismiss_event)
+            self.auto_dismiss_event = None
+
+        self.lbl_text.text = text
+        win_w = Window.width if Window.width > 0 else 412
+        self.width = min(win_w - 32, 380)
+        self.x = (win_w - self.width) / 2
+        self.y = 78
+
+        Animation.stop_all(self)
+        anim = Animation(opacity=1.0, duration=0.15)
+        anim.start(self)
+
+        self.auto_dismiss_event = Clock.schedule_once(lambda dt: self.hide(), duration)
+
+    def hide(self):
+        if self.auto_dismiss_event:
+            Clock.unschedule(self.auto_dismiss_event)
+            self.auto_dismiss_event = None
+        Animation.stop_all(self)
+        anim = Animation(opacity=0.0, duration=0.2)
+        anim.start(self)
+
+
 class GoldButton(ButtonBehavior, BoxLayout):
-    """Modern gold touch button with tactile feedback."""
-    def __init__(self, text="", is_outline=False, height_dp=48, **kwargs):
+    """Modern gold touch button with tactile feedback and 2s tooltip on long-press or hover."""
+    def __init__(self, text="", is_outline=False, height_dp=48, tooltip="", **kwargs):
         kwargs['size_hint_y'] = None
         kwargs['height'] = height_dp
         super().__init__(**kwargs)
         self.text = text
         self.is_outline = is_outline
+        self.tooltip = tooltip
         self.orientation = "horizontal"
         self.padding = [10, 4]
+
+        self._press_clock = None
+        self._hover_clock = None
+        self._is_hovered = False
+        self._did_long_press = False
 
         self.normal_bg = [0, 0, 0, 0] if is_outline else COLOR_GOLD
         self.pressed_bg = [0.83, 0.69, 0.22, 0.2] if is_outline else COLOR_GOLD_LIGHT
@@ -167,6 +249,8 @@ class GoldButton(ButtonBehavior, BoxLayout):
         self.lbl.bind(size=self.lbl.setter('text_size'))
         self.add_widget(self.lbl)
 
+        Window.bind(mouse_pos=self._on_mouse_pos)
+
     def _update_canvas(self, *args):
         self.rect.pos = self.pos
         self.rect.size = self.size
@@ -190,17 +274,84 @@ class GoldButton(ButtonBehavior, BoxLayout):
         self.text = text
         self.lbl.text = text
 
+    def on_touch_down(self, touch):
+        if not self.collide_point(*touch.pos):
+            return False
+        self._did_long_press = False
+        if self.tooltip:
+            if self._press_clock:
+                Clock.unschedule(self._press_clock)
+            self._press_clock = Clock.schedule_once(self._on_long_press_fired, 1.8)
+        return super().on_touch_down(touch)
+
+    def on_touch_move(self, touch):
+        if self._press_clock and not self.collide_point(*touch.pos):
+            Clock.unschedule(self._press_clock)
+            self._press_clock = None
+        return super().on_touch_move(touch)
+
+    def on_touch_up(self, touch):
+        if self._press_clock:
+            Clock.unschedule(self._press_clock)
+            self._press_clock = None
+        if self._did_long_press:
+            if touch.grab_current is self:
+                touch.ungrab(self)
+            self.canvas_bg.rgba = self.normal_bg
+            self._did_long_press = False
+            return True
+        return super().on_touch_up(touch)
+
+    def _on_long_press_fired(self, dt):
+        self._did_long_press = True
+        self._press_clock = None
+        if self.tooltip:
+            app = App.get_running_app()
+            if app and hasattr(app, 'show_tooltip'):
+                app.show_tooltip(self.tooltip)
+
+    def _on_mouse_pos(self, window, pos):
+        if not self.tooltip or not self.get_root_window():
+            return
+        inside = self.collide_point(*pos) and self.opacity > 0
+        if inside:
+            if not self._is_hovered:
+                self._is_hovered = True
+                self._hover_clock = Clock.schedule_once(self._on_hover_fired, 2.0)
+        else:
+            if self._is_hovered:
+                self._is_hovered = False
+                if self._hover_clock:
+                    Clock.unschedule(self._hover_clock)
+                    self._hover_clock = None
+                app = App.get_running_app()
+                if app and hasattr(app, 'hide_tooltip'):
+                    app.hide_tooltip()
+
+    def _on_hover_fired(self, dt):
+        self._hover_clock = None
+        if self._is_hovered and self.tooltip:
+            app = App.get_running_app()
+            if app and hasattr(app, 'show_tooltip'):
+                app.show_tooltip(self.tooltip)
+
 
 class NavButton(ButtonBehavior, BoxLayout):
-    """Bottom navigation bar button."""
-    def __init__(self, title="", icon_type="download", target_screen="", app_ref=None, **kwargs):
+    """Bottom navigation bar button with 2s tooltip on long-press or hover."""
+    def __init__(self, title="", icon_type="download", target_screen="", tooltip="", app_ref=None, **kwargs):
         super().__init__(**kwargs)
         self.orientation = "vertical"
         self.target_screen = target_screen
         self.app_ref = app_ref
+        self.tooltip = tooltip
         self.padding = [2, 4]
         self.spacing = 2
         self.is_active = False
+
+        self._press_clock = None
+        self._hover_clock = None
+        self._is_hovered = False
+        self._did_long_press = False
 
         self.box_icon = AnchorLayout(size_hint_y=0.6, anchor_x="center", anchor_y="center")
         self.v_icon = VectorIcon(icon_type=icon_type, is_active=False, size_px=20)
@@ -216,6 +367,8 @@ class NavButton(ButtonBehavior, BoxLayout):
         )
         self.add_widget(self.lbl_text)
 
+        Window.bind(mouse_pos=self._on_mouse_pos)
+
     def set_active(self, active):
         self.is_active = active
         self.v_icon.set_active(active)
@@ -225,6 +378,61 @@ class NavButton(ButtonBehavior, BoxLayout):
     def on_release(self):
         if self.app_ref:
             self.app_ref.switch_screen(self.target_screen)
+
+    def on_touch_down(self, touch):
+        if not self.collide_point(*touch.pos):
+            return False
+        self._did_long_press = False
+        if self.tooltip:
+            if self._press_clock:
+                Clock.unschedule(self._press_clock)
+            self._press_clock = Clock.schedule_once(self._on_long_press_fired, 1.8)
+        return super().on_touch_down(touch)
+
+    def on_touch_move(self, touch):
+        if self._press_clock and not self.collide_point(*touch.pos):
+            Clock.unschedule(self._press_clock)
+            self._press_clock = None
+        return super().on_touch_move(touch)
+
+    def on_touch_up(self, touch):
+        if self._press_clock:
+            Clock.unschedule(self._press_clock)
+            self._press_clock = None
+        if self._did_long_press:
+            if touch.grab_current is self:
+                touch.ungrab(self)
+            self._did_long_press = False
+            return True
+        return super().on_touch_up(touch)
+
+    def _on_long_press_fired(self, dt):
+        self._did_long_press = True
+        self._press_clock = None
+        if self.tooltip and self.app_ref:
+            self.app_ref.show_tooltip(self.tooltip)
+
+    def _on_mouse_pos(self, window, pos):
+        if not self.tooltip or not self.get_root_window():
+            return
+        inside = self.collide_point(*pos) and self.opacity > 0
+        if inside:
+            if not self._is_hovered:
+                self._is_hovered = True
+                self._hover_clock = Clock.schedule_once(self._on_hover_fired, 2.0)
+        else:
+            if self._is_hovered:
+                self._is_hovered = False
+                if self._hover_clock:
+                    Clock.unschedule(self._hover_clock)
+                    self._hover_clock = None
+                if self.app_ref:
+                    self.app_ref.hide_tooltip()
+
+    def _on_hover_fired(self, dt):
+        self._hover_clock = None
+        if self._is_hovered and self.tooltip and self.app_ref:
+            self.app_ref.show_tooltip(self.tooltip)
 
 
 # ==========================================================
@@ -303,16 +511,16 @@ class HomeScreen(Screen):
 
         # Quick Actions Toolbar (PASTE | CLEAN LINK | INSPECT | CLEAR)
         actions_row = BoxLayout(orientation="horizontal", spacing=6, size_hint_y=None, height=36)
-        self.btn_paste = GoldButton(text="PASTE", is_outline=True, height_dp=36, size_hint_x=0.28)
+        self.btn_paste = GoldButton(text="PASTE", is_outline=True, height_dp=36, size_hint_x=0.28, tooltip="Paste link from clipboard and automatically inspect it.")
         self.btn_paste.bind(on_release=self.action_paste)
         
-        self.btn_clean = GoldButton(text="CLEAN", is_outline=True, height_dp=36, size_hint_x=0.24)
+        self.btn_clean = GoldButton(text="CLEAN", is_outline=True, height_dp=36, size_hint_x=0.24, tooltip="Strip tracking IDs and playlist mix parameters from URL.")
         self.btn_clean.bind(on_release=self.action_clean_url)
 
-        self.btn_inspect = GoldButton(text="INSPECT", is_outline=False, height_dp=36, size_hint_x=0.30)
+        self.btn_inspect = GoldButton(text="INSPECT", is_outline=False, height_dp=36, size_hint_x=0.30, tooltip="Inspect link metadata, duration, track count, and size.")
         self.btn_inspect.bind(on_release=self.action_inspect)
 
-        self.btn_clear = GoldButton(text="CLEAR", is_outline=True, height_dp=36, size_hint_x=0.18)
+        self.btn_clear = GoldButton(text="CLEAR", is_outline=True, height_dp=36, size_hint_x=0.18, tooltip="Clear URL input box and reset inspection results.")
         self.btn_clear.bind(on_release=self.action_clear_input)
 
         actions_row.add_widget(self.btn_paste)
@@ -354,9 +562,9 @@ class HomeScreen(Screen):
         # Scope Selector (Visible when link has both a single video AND a playlist/mix)
         self.row_scope = BoxLayout(orientation="horizontal", spacing=8, size_hint_y=None, height=0, opacity=0.0)
         self.row_scope.disabled = True
-        self.btn_scope_single = GoldButton(text="THIS VIDEO ONLY", is_outline=False, height_dp=34, size_hint_x=0.5)
+        self.btn_scope_single = GoldButton(text="THIS VIDEO ONLY", is_outline=False, height_dp=34, size_hint_x=0.5, tooltip="Download only this single video, ignoring playlist/mix tracks.")
         self.btn_scope_single.bind(on_release=lambda *_: self.switch_scope("single"))
-        self.btn_scope_playlist = GoldButton(text="FULL PLAYLIST", is_outline=True, height_dp=34, size_hint_x=0.5)
+        self.btn_scope_playlist = GoldButton(text="FULL PLAYLIST", is_outline=True, height_dp=34, size_hint_x=0.5, tooltip="Download all media tracks in the full playlist or radio mix.")
         self.btn_scope_playlist.bind(on_release=lambda *_: self.switch_scope("playlist"))
         self.row_scope.add_widget(self.btn_scope_single)
         self.row_scope.add_widget(self.btn_scope_playlist)
@@ -391,15 +599,15 @@ class HomeScreen(Screen):
         grid_fmt = GridLayout(cols=3, spacing=6, size_hint_y=None, height=80)
         self.fmt_buttons = {}
         formats = [
-            ("video_best", "MP4 Best"),
-            ("video_720", "MP4 720p"),
-            ("mp3_320", "MP3 320k"),
-            ("mp3_192", "MP3 192k"),
-            ("mp3_128", "USB 128k"),
-            ("m4a", "AAC M4A"),
+            ("video_best", "MP4 Best", "Download highest available MP4 video quality."),
+            ("video_720", "MP4 720p", "Download crisp 720p HD MP4 video for faster saving."),
+            ("mp3_320", "MP3 320k", "Extract maximum fidelity 320 kbps CBR MP3 audio stream."),
+            ("mp3_192", "MP3 192k", "Extract standard high-quality 192 kbps MP3 audio."),
+            ("mp3_128", "USB 128k", "Extract 128 kbps MP3 with clean filenames for car USB & players."),
+            ("m4a", "AAC M4A", "Extract untouched original AAC audio stream without transcoding."),
         ]
-        for key, name in formats:
-            btn = GoldButton(text=name, is_outline=(key != self.selected_format), height_dp=36)
+        for key, name, tip in formats:
+            btn = GoldButton(text=name, is_outline=(key != self.selected_format), height_dp=36, tooltip=tip)
             btn.lbl.font_size = "13sp"
             btn.bind(on_release=lambda instance, k=key: self.select_format(k))
             self.fmt_buttons[key] = btn
@@ -439,7 +647,7 @@ class HomeScreen(Screen):
         content.add_widget(self.card_progress)
 
         # Primary Download Action Button
-        self.btn_download = GoldButton(text="START DOWNLOAD", is_outline=False, height_dp=52)
+        self.btn_download = GoldButton(text="START DOWNLOAD", is_outline=False, height_dp=52, tooltip="Start downloading the inspected media to your device storage.")
         self.btn_download.bind(on_release=self.action_start_download)
         content.add_widget(self.btn_download)
 
@@ -755,7 +963,7 @@ class ManagerScreen(Screen):
         scroll.add_widget(self.list_layout)
         root.add_widget(scroll)
 
-        btn_clear = GoldButton(text="CLEAR HISTORY", is_outline=True, height_dp=42)
+        btn_clear = GoldButton(text="CLEAR HISTORY", is_outline=True, height_dp=42, tooltip="Clears the download history list from display.")
         btn_clear.bind(on_release=self.clear_all)
         root.add_widget(btn_clear)
 
@@ -793,9 +1001,9 @@ class ManagerScreen(Screen):
         card.add_widget(row_top)
 
         row_actions = BoxLayout(orientation="horizontal", spacing=8, size_hint_y=None, height=32)
-        btn_open = GoldButton(text="OPEN FILE", is_outline=True, height_dp=32, size_hint_x=0.5)
+        btn_open = GoldButton(text="OPEN FILE", is_outline=True, height_dp=32, size_hint_x=0.5, tooltip="Opens this media file in your default player.")
         btn_open.bind(on_release=lambda x: self.open_file(path))
-        btn_folder = GoldButton(text="FOLDER", is_outline=True, height_dp=32, size_hint_x=0.5)
+        btn_folder = GoldButton(text="FOLDER", is_outline=True, height_dp=32, size_hint_x=0.5, tooltip="Opens the folder containing this file in file manager.")
         btn_folder.bind(on_release=lambda x: self.open_folder(path))
         row_actions.add_widget(btn_open)
         row_actions.add_widget(btn_folder)
@@ -915,9 +1123,9 @@ class SettingsScreen(Screen):
         card_dest.add_widget(self.input_dest)
 
         row_dest_act = BoxLayout(orientation="horizontal", spacing=8, size_hint_y=None, height=36)
-        btn_save_dest = GoldButton(text="SAVE FOLDER", is_outline=False, height_dp=36, size_hint_x=0.5)
+        btn_save_dest = GoldButton(text="SAVE FOLDER", is_outline=False, height_dp=36, size_hint_x=0.5, tooltip="Saves custom destination path to app settings.")
         btn_save_dest.bind(on_release=self.save_folder)
-        btn_reset_dest = GoldButton(text="RESET DEFAULT", is_outline=True, height_dp=36, size_hint_x=0.5)
+        btn_reset_dest = GoldButton(text="RESET DEFAULT", is_outline=True, height_dp=36, size_hint_x=0.5, tooltip="Restores default storage path to device Downloads folder.")
         btn_reset_dest.bind(on_release=self.reset_folder)
         row_dest_act.add_widget(btn_save_dest)
         row_dest_act.add_widget(btn_reset_dest)
@@ -949,7 +1157,7 @@ class SettingsScreen(Screen):
             halign="left"
         )
         self.lbl_dup_status.bind(size=self.lbl_dup_status.setter('text_size'))
-        btn_toggle_dup = GoldButton(text="TOGGLE", is_outline=True, height_dp=34, size_hint_x=0.3)
+        btn_toggle_dup = GoldButton(text="TOGGLE", is_outline=True, height_dp=34, size_hint_x=0.3, tooltip="Toggles automatic skipping of duplicate downloads.")
         btn_toggle_dup.bind(on_release=self.toggle_dup)
         row_dup.add_widget(self.lbl_dup_status)
         row_dup.add_widget(btn_toggle_dup)
@@ -1053,9 +1261,9 @@ class UniversalDownloaderMobileApp(App):
             except Exception:
                 pass
 
-        self.master_layout = AnchorLayout(anchor_x="center", anchor_y="bottom")
+        self.master_layout = FloatLayout()
 
-        self.sm = ScreenManager(transition=SlideTransition(duration=0.2))
+        self.sm = ScreenManager(transition=SlideTransition(duration=0.2), size_hint=(1, 1), pos_hint={'x': 0, 'y': 0})
         self.home_screen = HomeScreen(self, name="home")
         self.manager_screen = ManagerScreen(self, name="manager")
         self.settings_screen = SettingsScreen(self, name="settings")
@@ -1069,6 +1277,7 @@ class UniversalDownloaderMobileApp(App):
             orientation="horizontal",
             size_hint=(1, None),
             height=65,
+            pos_hint={'x': 0, 'y': 0},
             padding=[16, 4],
             spacing=10,
             bg_color=[0.08, 0.08, 0.11, 0.98],
@@ -1076,21 +1285,32 @@ class UniversalDownloaderMobileApp(App):
             radius=0
         )
 
-        self.nav_home = NavButton(title="Downloader", icon_type="download", target_screen="home", app_ref=self)
-        self.nav_mgr = NavButton(title="Manager", icon_type="manager", target_screen="manager", app_ref=self)
-        self.nav_set = NavButton(title="Settings", icon_type="settings", target_screen="settings", app_ref=self)
+        self.nav_home = NavButton(title="Downloader", icon_type="download", target_screen="home", app_ref=self, tooltip="Go to primary media link downloader screen.")
+        self.nav_mgr = NavButton(title="Manager", icon_type="manager", target_screen="manager", app_ref=self, tooltip="View and manage downloaded media files on your device.")
+        self.nav_set = NavButton(title="Settings", icon_type="settings", target_screen="settings", app_ref=self, tooltip="Configure download folder, duplicate filtering, and preferences.")
 
         self.nav_bar.add_widget(self.nav_home)
         self.nav_bar.add_widget(self.nav_mgr)
         self.nav_bar.add_widget(self.nav_set)
         self.nav_home.set_active(True)
 
+        self.tooltip_toast = TooltipToast()
+
         self.master_layout.add_widget(self.sm)
         self.master_layout.add_widget(self.nav_bar)
+        self.master_layout.add_widget(self.tooltip_toast)
 
         Clock.schedule_once(self.check_android_share_intent, 0.5)
 
         return self.master_layout
+
+    def show_tooltip(self, text):
+        if hasattr(self, 'tooltip_toast'):
+            self.tooltip_toast.show(text)
+
+    def hide_tooltip(self):
+        if hasattr(self, 'tooltip_toast'):
+            self.tooltip_toast.hide()
 
     def switch_screen(self, screen_name):
         self.sm.current = screen_name

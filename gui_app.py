@@ -10,6 +10,7 @@ import queue
 import urllib.parse
 import yt_dlp
 import customtkinter as ctk
+import tkinter as tk
 from tkinter import filedialog, messagebox
 
 # Resolve base directory (PyInstaller bundled vs source)
@@ -184,6 +185,108 @@ def get_core_title_key(title):
     if len(candidate) < 3 and len(parts) > 1:
         candidate = re.sub(r'[^a-zA-Z0-9]', '', (parts[0] + parts[1]).lower())
     return candidate
+
+
+class CTkTooltip:
+    """Displays a sleek dark obsidian & gold 1-line tooltip when hovering for 2s+ or on long-press."""
+    def __init__(self, widget, text, delay_ms=2000):
+        self.widget = widget
+        self.text = text
+        self.delay_ms = delay_ms
+        self.tip_window = None
+        self.timer_id = None
+        self.press_timer_id = None
+
+        self.widget.bind("<Enter>", self.on_enter, add="+")
+        self.widget.bind("<Leave>", self.on_leave, add="+")
+        self.widget.bind("<ButtonPress-1>", self.on_press, add="+")
+        self.widget.bind("<ButtonRelease-1>", self.on_release, add="+")
+
+    def on_enter(self, event=None):
+        self.schedule_tooltip()
+
+    def on_leave(self, event=None):
+        try:
+            x, y = self.widget.winfo_pointerxy()
+            wx = self.widget.winfo_rootx()
+            wy = self.widget.winfo_rooty()
+            ww = self.widget.winfo_width()
+            wh = self.widget.winfo_height()
+            if wx <= x <= wx + ww and wy <= y <= wy + wh:
+                return
+        except Exception:
+            pass
+        self.cancel_timer()
+        self.hide_tooltip()
+
+    def on_press(self, event=None):
+        self.cancel_timer()
+        if self.press_timer_id:
+            try:
+                self.widget.after_cancel(self.press_timer_id)
+            except Exception:
+                pass
+        self.press_timer_id = self.widget.after(1800, self.show_tooltip)
+
+    def on_release(self, event=None):
+        if self.press_timer_id:
+            try:
+                self.widget.after_cancel(self.press_timer_id)
+            except Exception:
+                pass
+            self.press_timer_id = None
+
+    def schedule_tooltip(self):
+        self.cancel_timer()
+        self.timer_id = self.widget.after(self.delay_ms, self.show_tooltip)
+
+    def cancel_timer(self):
+        if self.timer_id:
+            try:
+                self.widget.after_cancel(self.timer_id)
+            except Exception:
+                pass
+            self.timer_id = None
+
+    def show_tooltip(self):
+        if self.tip_window or not self.text:
+            return
+        try:
+            x = self.widget.winfo_rootx() + (self.widget.winfo_width() // 2)
+            y = self.widget.winfo_rooty() + self.widget.winfo_height() + 8
+        except Exception:
+            return
+
+        self.tip_window = tw = tk.Toplevel(self.widget)
+        tw.wm_overrideredirect(True)
+        tw.wm_attributes("-topmost", True)
+
+        frame = tk.Frame(tw, bg="#0E0E13", highlightbackground="#D4AF37", highlightthickness=1)
+        frame.pack()
+
+        lbl_icon = tk.Label(frame, text="◆ INFO", bg="#0E0E13", fg="#D4AF37", font=(FONT_FAMILY, 9, "bold"))
+        lbl_icon.pack(side="left", padx=(10, 4), pady=6)
+
+        lbl = tk.Label(frame, text=self.text, bg="#0E0E13", fg="#F4F4F5", font=(FONT_FAMILY, 10))
+        lbl.pack(side="left", padx=(0, 12), pady=6)
+
+        tw.update_idletasks()
+        tip_w = tw.winfo_width()
+        tip_h = tw.winfo_height()
+
+        screen_w = tw.winfo_screenwidth()
+        screen_h = tw.winfo_screenheight()
+        pos_x = max(10, min(x - (tip_w // 2), screen_w - tip_w - 10))
+        pos_y = y
+        if pos_y + tip_h > screen_h - 20:
+            pos_y = self.widget.winfo_rooty() - tip_h - 8
+
+        tw.wm_geometry(f"+{pos_x}+{pos_y}")
+
+    def hide_tooltip(self):
+        if self.tip_window:
+            self.tip_window.destroy()
+            self.tip_window = None
 
 
 class UniversalDownloaderApp(ctk.CTk):
@@ -390,6 +493,7 @@ class UniversalDownloaderApp(ctk.CTk):
             command=self.open_current_destination
         )
         btn_open_folder.pack(fill="x", padx=8, pady=(8, 4))
+        CTkTooltip(btn_open_folder, "Open the current downloads folder in Windows File Explorer.")
 
         btn_clear_dm = ctk.CTkButton(
             dm_footer, text="CLEAR LIST", height=26, corner_radius=4,
@@ -399,6 +503,7 @@ class UniversalDownloaderApp(ctk.CTk):
             command=self.clear_manager_list
         )
         btn_clear_dm.pack(fill="x", padx=8, pady=(0, 8))
+        CTkTooltip(btn_clear_dm, "Clear completed items from the download manager list.")
 
         # ---------------- MAIN CONTENT VIEWPORT ----------------
         main_viewport = ctk.CTkFrame(workbench, corner_radius=0, fg_color=self.tokens["bg"])
@@ -432,21 +537,25 @@ class UniversalDownloaderApp(ctk.CTk):
         self.entry_url.pack(side="left", fill="x", expand=True, padx=(0, 6))
         self.entry_url.bind("<Return>", lambda _event: self.trigger_analyze())
 
-        ctk.CTkButton(
+        btn_paste = ctk.CTkButton(
             url_row, text="PASTE", width=62, height=40, corner_radius=4,
             font=ctk.CTkFont(family=FONT_FAMILY, size=11, weight="bold"),
             fg_color=self.tokens["gold_subtle"], hover_color=self.tokens["gold_dark"],
             border_width=1, border_color=self.tokens["gold_border"],
             text_color=self.tokens["gold_bright"], command=self.paste_from_clipboard
-        ).pack(side="left", padx=(0, 6))
+        )
+        btn_paste.pack(side="left", padx=(0, 6))
+        CTkTooltip(btn_paste, "Paste link from clipboard and automatically inspect metadata.")
 
-        ctk.CTkButton(
+        btn_clean = ctk.CTkButton(
             url_row, text="CLEAN", width=62, height=40, corner_radius=4,
             font=ctk.CTkFont(family=FONT_FAMILY, size=11, weight="bold"),
             fg_color=self.tokens["gold_subtle"], hover_color=self.tokens["gold_dark"],
             border_width=1, border_color=self.tokens["gold_border"],
             text_color=self.tokens["gold_bright"], command=self.clean_url_input
-        ).pack(side="left", padx=(0, 6))
+        )
+        btn_clean.pack(side="left", padx=(0, 6))
+        CTkTooltip(btn_clean, "Strip tracking parameters, timestamps, and radio mix tokens from URL.")
 
         self.btn_analyze = ctk.CTkButton(
             url_row, text="INSPECT", width=86, height=40, corner_radius=4,
@@ -456,14 +565,17 @@ class UniversalDownloaderApp(ctk.CTk):
             text_color=self.tokens["gold_bright"], command=self.trigger_analyze
         )
         self.btn_analyze.pack(side="left", padx=(0, 6))
+        CTkTooltip(self.btn_analyze, "Inspect link metadata, duration, track count, and estimated file size.")
 
-        ctk.CTkButton(
+        btn_clear = ctk.CTkButton(
             url_row, text="CLEAR", width=58, height=40, corner_radius=4,
             font=ctk.CTkFont(family=FONT_FAMILY, size=11, weight="bold"),
             fg_color=self.tokens["gold_subtle"], hover_color=self.tokens["gold_dark"],
             border_width=1, border_color=self.tokens["gold_border"],
             text_color=self.tokens["gold_bright"], command=self.clear_url_input
-        ).pack(side="left")
+        )
+        btn_clear.pack(side="left")
+        CTkTooltip(btn_clear, "Clear the link input field and reset inspection card.")
 
         # Media Inspection Card (Revealed upon inspection)
         self.frame_analysis = ctk.CTkFrame(
@@ -499,6 +611,7 @@ class UniversalDownloaderApp(ctk.CTk):
             text_color=self.tokens["gold_text_dark"], command=lambda: self.switch_scope("single")
         )
         self.btn_scope_single.pack(side="left", padx=(0, 8))
+        CTkTooltip(self.btn_scope_single, "Download only this single video, ignoring playlist or radio mix.")
 
         self.btn_scope_playlist = ctk.CTkButton(
             self.scope_row, text="FULL PLAYLIST", width=140, height=28, corner_radius=4,
@@ -508,6 +621,7 @@ class UniversalDownloaderApp(ctk.CTk):
             text_color=self.tokens["text_secondary"], command=lambda: self.switch_scope("playlist")
         )
         self.btn_scope_playlist.pack(side="left")
+        CTkTooltip(self.btn_scope_playlist, "Download all media tracks in the full playlist or radio mix.")
 
         # Inspection Metric Chips Container (Gold accented)
         self.chips_row = ctk.CTkFrame(self.frame_analysis, fg_color="transparent")
@@ -545,6 +659,7 @@ class UniversalDownloaderApp(ctk.CTk):
             text_color=self.tokens["gold_text_dark"], command=lambda: self.switch_mode("video")
         )
         self.btn_mode_video.pack(side="left", padx=2, pady=2)
+        CTkTooltip(self.btn_mode_video, "Switch output format selector to MP4 video profiles.")
 
         self.btn_mode_audio = ctk.CTkButton(
             segmented_switcher, text="♫ AUDIO", width=76, height=26, corner_radius=3,
@@ -553,6 +668,7 @@ class UniversalDownloaderApp(ctk.CTk):
             text_color=self.tokens["text_secondary"], command=lambda: self.switch_mode("audio")
         )
         self.btn_mode_audio.pack(side="left", padx=2, pady=2)
+        CTkTooltip(self.btn_mode_audio, "Switch output format selector to MP3 and AAC audio profiles.")
 
         # Format selector dropdown
         self.combo_format = ctk.CTkComboBox(
@@ -604,13 +720,15 @@ class UniversalDownloaderApp(ctk.CTk):
         self.entry_dest.insert(0, initial_dest)
         self.entry_dest.bind("<FocusOut>", lambda _event: save_destination(self.entry_dest.get().strip()))
 
-        ctk.CTkButton(
+        btn_browse = ctk.CTkButton(
             dest_inner, text="BROWSE", width=74, height=36, corner_radius=4,
             font=ctk.CTkFont(family=FONT_FAMILY, size=10, weight="bold"),
             fg_color=self.tokens["surface_elevated"], hover_color=self.tokens["surface_hover"],
             border_width=1, border_color=self.tokens["border"],
             text_color=self.tokens["text_primary"], command=self.browse_folder
-        ).pack(side="left")
+        )
+        btn_browse.pack(side="left")
+        CTkTooltip(btn_browse, "Browse and choose a custom destination folder on your computer.")
 
         self.entry_limit = ctk.CTkEntry(
             params_row, placeholder_text="Item limit (optional)", height=36, corner_radius=4,
@@ -630,6 +748,7 @@ class UniversalDownloaderApp(ctk.CTk):
             checkmark_color=self.tokens["gold_text_dark"], border_color=self.tokens["border_strong"]
         )
         self.chk_dups.pack(anchor="w", pady=(0, 14))
+        CTkTooltip(self.chk_dups, "Skip downloading any files that already exist in your destination folder.")
 
         # 4. Action Row (Gold CTA & Subtle Dark Gold Stop Button)
         action_row = ctk.CTkFrame(controls_panel, fg_color="transparent")
@@ -642,6 +761,7 @@ class UniversalDownloaderApp(ctk.CTk):
             text_color=self.tokens["gold_text_dark"], command=self.start_download
         )
         self.btn_download.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        CTkTooltip(self.btn_download, "Begin downloading the selected media files.")
 
         self.btn_stop = ctk.CTkButton(
             action_row, text="STOP", width=90, height=44, corner_radius=5,
@@ -651,6 +771,7 @@ class UniversalDownloaderApp(ctk.CTk):
             text_color=self.tokens["gold_bright"], state="disabled", command=self.stop_download
         )
         self.btn_stop.pack(side="left")
+        CTkTooltip(self.btn_stop, "Cancel and halt the ongoing download task.")
 
         # --- LOWER ACTIVITY & TELEMETRY SECTION ---
         term_frame = ctk.CTkFrame(
@@ -722,12 +843,14 @@ class UniversalDownloaderApp(ctk.CTk):
             text_color=self.tokens["text_muted"]
         ).grid(row=0, column=0, sticky="w")
 
-        ctk.CTkButton(
+        btn_clear_logs = ctk.CTkButton(
             console_toolbar, text="[CLEAR]", width=48, height=20, corner_radius=2,
             font=ctk.CTkFont(family=FONT_FAMILY, size=9),
             fg_color="transparent", hover_color=self.tokens["surface_elevated"],
             text_color=self.tokens["text_muted"], command=self.clear_logs
-        ).grid(row=0, column=1, sticky="e")
+        )
+        btn_clear_logs.grid(row=0, column=1, sticky="e")
+        CTkTooltip(btn_clear_logs, "Clear the activity terminal log.")
 
         self.txt_terminal = ctk.CTkTextbox(
             term_body, corner_radius=0, fg_color="#060608", text_color="#D4D4D8",
