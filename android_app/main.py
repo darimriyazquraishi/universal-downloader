@@ -628,13 +628,13 @@ class HomeScreen(Screen):
         lbl_fmt_head.bind(size=lbl_fmt_head.setter('text_size'))
         row_fmt_head.add_widget(lbl_fmt_head)
 
-        # Gold Segmented Switcher ([ 🎬 VIDEO ] / [ ♫ AUDIO ])
+        # Gold Segmented Switcher (VIDEO / AUDIO)
         box_switcher = BoxLayout(orientation="horizontal", spacing=4, size_hint=(None, None), size=(180, 28))
-        self.btn_mode_video = GoldButton(text="🎬 VIDEO", is_outline=False, height_dp=28, size_hint=(None, None), size=(88, 28), tooltip="Switch to MP4 Video quality profiles.")
+        self.btn_mode_video = GoldButton(text="VIDEO", is_outline=False, height_dp=28, size_hint=(None, None), size=(88, 28), tooltip="Switch to MP4 Video quality profiles.")
         self.btn_mode_video.lbl.font_size = "11sp"
         self.btn_mode_video.bind(on_release=lambda *_: self.switch_mode("video"))
 
-        self.btn_mode_audio = GoldButton(text="♫ AUDIO", is_outline=True, height_dp=28, size_hint=(None, None), size=(88, 28), tooltip="Switch to MP3 & M4A Audio profiles.")
+        self.btn_mode_audio = GoldButton(text="AUDIO", is_outline=True, height_dp=28, size_hint=(None, None), size=(88, 28), tooltip="Switch to MP3 & M4A Audio profiles.")
         self.btn_mode_audio.lbl.font_size = "11sp"
         self.btn_mode_audio.bind(on_release=lambda *_: self.switch_mode("audio"))
 
@@ -650,27 +650,27 @@ class HomeScreen(Screen):
 
         self.fmt_buttons = {}
         video_formats = [
-            ("video_best", "⚡ MP4 Best", "Highest available MP4 video (up to 4K / 1080p)."),
-            ("video_1080", "🎬 MP4 1080p", "Crisp 1080p Full HD video stream."),
-            ("video_720", "📺 MP4 720p", "720p HD MP4 video for fast download."),
-            ("video_480", "📱 MP4 480p", "480p SD MP4 video for data saving."),
+            ("video_best", "MP4 Best", "Highest available MP4 video (up to 4K / 1080p)."),
+            ("video_1080", "MP4 1080p", "Crisp 1080p Full HD video stream."),
+            ("video_720", "MP4 720p", "720p HD MP4 video for fast download."),
+            ("video_480", "MP4 480p", "480p SD MP4 video for data saving."),
         ]
         for key, name, tip in video_formats:
             btn = GoldButton(text=name, is_outline=(key != self.selected_format), height_dp=41, tooltip=tip)
-            btn.lbl.font_size = "12.5sp"
+            btn.lbl.font_size = "13sp"
             btn.bind(on_release=lambda instance, k=key: self.select_format(k))
             self.fmt_buttons[key] = btn
             self.grid_fmt_video.add_widget(btn)
 
         audio_formats = [
-            ("mp3_320", "💎 MP3 320k", "Maximum fidelity 320 kbps CBR MP3 audio stream."),
-            ("mp3_192", "🎵 MP3 192k", "Standard high-quality 192 kbps MP3 audio."),
-            ("mp3_128", "🚗 USB 128k", "128 kbps MP3 with clean metadata for car USB & players."),
-            ("m4a", "🎧 AAC M4A", "Untouched original AAC audio stream without transcoding."),
+            ("mp3_320", "MP3 320k", "Maximum fidelity 320 kbps CBR MP3 audio stream."),
+            ("mp3_192", "MP3 192k", "Standard high-quality 192 kbps MP3 audio."),
+            ("mp3_128", "USB 128k", "128 kbps MP3 with clean metadata for car USB & players."),
+            ("m4a", "AAC M4A", "Untouched original AAC audio stream without transcoding."),
         ]
         for key, name, tip in audio_formats:
             btn = GoldButton(text=name, is_outline=(key != self.selected_format), height_dp=41, tooltip=tip)
-            btn.lbl.font_size = "12.5sp"
+            btn.lbl.font_size = "13sp"
             btn.bind(on_release=lambda instance, k=key: self.select_format(k))
             self.fmt_buttons[key] = btn
             self.grid_fmt_audio.add_widget(btn)

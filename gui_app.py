@@ -539,7 +539,7 @@ class UniversalDownloaderApp(ctk.CTk):
         dm_footer.grid(row=2, column=0, sticky="ew", padx=12, pady=14)
 
         btn_open_folder = ctk.CTkButton(
-            dm_footer, text="📁 OPEN DOWNLOADS", height=32, corner_radius=4,
+            dm_footer, text="OPEN DOWNLOADS", height=32, corner_radius=4,
             font=ctk.CTkFont(family=FONT_FAMILY, size=10, weight="bold"),
             fg_color=self.tokens["gold_subtle"], hover_color=self.tokens["gold_dark"],
             border_width=1, border_color=self.tokens["gold_border"],
@@ -697,7 +697,7 @@ class UniversalDownloaderApp(ctk.CTk):
         segmented_switcher.pack(side="right")
 
         self.btn_mode_video = ctk.CTkButton(
-            segmented_switcher, text="🎬 VIDEO", width=76, height=26, corner_radius=3,
+            segmented_switcher, text="VIDEO", width=76, height=26, corner_radius=3,
             font=ctk.CTkFont(family=FONT_FAMILY, size=10, weight="bold"),
             fg_color=self.tokens["gold"], hover_color=self.tokens["gold_hover"],
             text_color=self.tokens["gold_text_dark"], command=lambda: self.switch_mode("video")
@@ -706,7 +706,7 @@ class UniversalDownloaderApp(ctk.CTk):
         CTkTooltip(self.btn_mode_video, "Switch output format selector to MP4 video profiles.")
 
         self.btn_mode_audio = ctk.CTkButton(
-            segmented_switcher, text="♫ AUDIO", width=76, height=26, corner_radius=3,
+            segmented_switcher, text="AUDIO", width=76, height=26, corner_radius=3,
             font=ctk.CTkFont(family=FONT_FAMILY, size=10, weight="bold"),
             fg_color="transparent", hover_color=self.tokens["surface_hover"],
             text_color=self.tokens["text_secondary"], command=lambda: self.switch_mode("audio")
