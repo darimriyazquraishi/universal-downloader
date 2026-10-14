@@ -1047,7 +1047,19 @@ class UniversalDownloaderApp(ctk.CTk):
                 files.sort(key=lambda f: os.path.getmtime(os.path.join(dest, f)), reverse=True)
                 for f in files[:15]:
                     full_p = os.path.join(dest, f)
-                    fmt_tag = "MP4 Video" if f.lower().endswith(('.mp4', '.mkv', '.webm')) else "MP3 Audio"
+                    f_lower = f.lower()
+                    if f_lower.endswith(('.mp4', '.mkv', '.webm', '.mov')):
+                        if '[best]' in f_lower: fmt_tag = "MP4 · Best"
+                        elif '[1080p]' in f_lower: fmt_tag = "MP4 · 1080p"
+                        elif '[720p]' in f_lower: fmt_tag = "MP4 · 720p"
+                        elif '[480p]' in f_lower: fmt_tag = "MP4 · 480p"
+                        else: fmt_tag = "MP4 Video"
+                    else:
+                        if '[320k]' in f_lower: fmt_tag = "MP3 · 320k"
+                        elif '[192k]' in f_lower: fmt_tag = "MP3 · 192k"
+                        elif '[128k]' in f_lower: fmt_tag = "MP3 · 128k"
+                        elif f_lower.endswith('.m4a'): fmt_tag = "AAC M4A"
+                        else: fmt_tag = "MP3 Audio"
                     self.add_manager_item(f, f, "✓ Saved", fmt_tag, full_p)
         except Exception:
             pass
@@ -1443,10 +1455,43 @@ class UniversalDownloaderApp(ctk.CTk):
         video_quality = download_type.replace("video_", "") if is_video else "best"
         bitrate = "320" if download_type == "mp3_320" else ("192" if download_type == "mp3_192" else "128")
 
+        if is_video:
+            if video_quality == 'best':
+                q_tag = "Best"
+                q_tier = "best"
+            elif video_quality == '1080':
+                q_tag = "1080p"
+                q_tier = "1080"
+            elif video_quality == '720':
+                q_tag = "720p"
+                q_tier = "720"
+            elif video_quality == '480':
+                q_tag = "480p"
+                q_tier = "480"
+            else:
+                q_tag = video_quality.upper()
+                q_tier = video_quality.lower()
+        else:
+            if download_type == "mp3_320":
+                q_tag = "320k"
+                q_tier = "320"
+            elif download_type == "mp3_192":
+                q_tag = "192k"
+                q_tier = "192"
+            elif download_type == "mp3_speaker":
+                q_tag = "128k"
+                q_tier = "128"
+            elif download_type == "m4a":
+                q_tag = "m4a"
+                q_tier = "m4a"
+            else:
+                q_tag = "128k"
+                q_tier = "128"
+
         platform = detect_platform(url)
         self.append_log(f"[QUEUE] Platform detected: {platform}")
         self.append_log(f"[QUEUE] Target directory: {dest_dir}")
-        self.append_log(f"[QUEUE] Format profile: {download_type}")
+        self.append_log(f"[QUEUE] Format profile: {download_type} ({q_tag})")
 
         # Smart target URL resolution: Single video vs Playlist
         parsed = parse_url_structure(url)
@@ -1477,13 +1522,13 @@ class UniversalDownloaderApp(ctk.CTk):
         is_playlist = 'entries' in info and bool(info.get('entries'))
         entries = [e for e in info.get('entries', []) if e] if is_playlist else [info]
 
-        # Scan existing files for duplicate check
+        # Scan existing files for duplicate check with quality awareness
         if is_video:
-            existing_files = [f for f in os.listdir(dest_dir) if f.lower().endswith(('.mp4', '.mkv', '.webm', '.mov'))]
+            existing_files = [f for f in os.listdir(dest_dir) if f.lower().endswith(('.mp4', '.mkv', '.webm', '.mov', '.avi'))]
         else:
-            existing_files = [f for f in os.listdir(dest_dir) if f.lower().endswith(('.mp3', '.m4a', '.opus', '.aac'))]
+            existing_files = [f for f in os.listdir(dest_dir) if f.lower().endswith(('.mp3', '.m4a', '.opus', '.aac', '.flac'))]
 
-        existing_keys = set()
+        existing_records_by_key = {}
         max_idx = 0
         for f in existing_files:
             m = re.match(r'^(\d+)\s*-\s*(.+)\.[a-z0-9]+$', f, re.IGNORECASE)
@@ -1491,9 +1536,42 @@ class UniversalDownloaderApp(ctk.CTk):
                 num = int(m.group(1))
                 if num > max_idx:
                     max_idx = num
-                existing_keys.add(get_core_title_key(m.group(2)))
+                raw_title = m.group(2)
             else:
-                existing_keys.add(get_core_title_key(os.path.splitext(f)[0]))
+                raw_title = os.path.splitext(f)[0]
+
+            k = get_core_title_key(raw_title)
+
+            # Check for explicit quality tag in filename: e.g. [1080p], [720p], [Best], [320k]
+            m_tag = re.search(r'\[(best|2160p?|4k|1440p?|1080p?|720p?|480p?|360p?|320k|192k|128k|m4a)\]', f, re.IGNORECASE)
+            detected_tag = None
+            if m_tag:
+                raw_tag = m_tag.group(1).lower()
+                if raw_tag in ('best', '2160', '2160p', '4k', '1440', '1440p'):
+                    detected_tag = 'best'
+                elif '1080' in raw_tag:
+                    detected_tag = '1080'
+                elif '720' in raw_tag:
+                    detected_tag = '720'
+                elif '480' in raw_tag:
+                    detected_tag = '480'
+                elif '320' in raw_tag:
+                    detected_tag = '320'
+                elif '192' in raw_tag:
+                    detected_tag = '192'
+                elif '128' in raw_tag:
+                    detected_tag = '128'
+                elif 'm4a' in raw_tag:
+                    detected_tag = 'm4a'
+
+            if k not in existing_records_by_key:
+                existing_records_by_key[k] = []
+            existing_records_by_key[k].append({
+                'filename': f,
+                'filepath': os.path.join(dest_dir, f),
+                'tag': detected_tag,
+                'is_video': is_video
+            })
 
         queue_items = []
         seen_keys = set()
@@ -1511,13 +1589,57 @@ class UniversalDownloaderApp(ctk.CTk):
                     item_url = target_download_url
 
             k = get_core_title_key(t)
-            if ignore_dups:
-                if k in existing_keys:
-                    self.append_log(f"[SKIP] Existing: {t}")
-                    continue
-                if k in seen_keys:
-                    self.append_log(f"[SKIP] Duplicate in batch: {t}")
-                    continue
+            is_dup = False
+            dup_reason = ""
+
+            if ignore_dups and k in existing_records_by_key:
+                for rec in existing_records_by_key[k]:
+                    # If this existing file didn't have a tag in its name, probe it on-demand
+                    if rec['tag'] is None and is_video and os.path.exists(rec['filepath']):
+                        try:
+                            probe_res = subprocess.run([FFMPEG_EXE, '-i', rec['filepath']], capture_output=True, text=True, timeout=1)
+                            m_res = re.search(r'(\d{3,4})x(\d{3,4})', probe_res.stderr)
+                            if m_res:
+                                w_val, h_val = int(m_res.group(1)), int(m_res.group(2))
+                                tier = min(w_val, h_val)
+                                if tier > 1080: rec['tag'] = 'best'
+                                elif tier >= 900: rec['tag'] = '1080'
+                                elif tier >= 600: rec['tag'] = '720'
+                                elif tier >= 400: rec['tag'] = '480'
+                                else: rec['tag'] = '360'
+                        except Exception:
+                            pass
+
+                    # Compare requested quality profile
+                    if is_video:
+                        if rec['tag'] == q_tier:
+                            is_dup = True
+                            dup_reason = f"Existing ({q_tag}): {rec['filename']}"
+                            break
+                        elif q_tier == 'best' and rec['tag'] in ('best', '2160', '4k'):
+                            is_dup = True
+                            dup_reason = f"Existing (Best): {rec['filename']}"
+                            break
+                    else:
+                        if rec['tag'] == q_tier:
+                            is_dup = True
+                            dup_reason = f"Existing ({q_tag}): {rec['filename']}"
+                            break
+                        elif rec['tag'] is None:
+                            if (download_type == 'm4a' and rec['filename'].lower().endswith('.m4a')) or \
+                               (download_type.startswith('mp3') and rec['filename'].lower().endswith('.mp3')):
+                                is_dup = True
+                                dup_reason = f"Existing Audio: {rec['filename']}"
+                                break
+
+            if is_dup:
+                self.append_log(f"[SKIP] {dup_reason}")
+                continue
+
+            if k in seen_keys:
+                self.append_log(f"[SKIP] Duplicate in batch: {t}")
+                continue
+
             seen_keys.add(k)
             queue_items.append({'id': vid, 'title': t, 'duration': dur, 'url': item_url, 'key': k})
             if max_tracks > 0 and len(queue_items) >= max_tracks:
@@ -1527,7 +1649,7 @@ class UniversalDownloaderApp(ctk.CTk):
         self.append_log(f"[QUEUE] {total_queue} item(s) queued for download.")
 
         if total_queue == 0:
-            self.append_log("[OK] All requested items already exist in destination.")
+            self.append_log(f"[OK] All requested items already exist in destination ({format_label}).")
             self.after(0, self.finish_download)
             return
 
@@ -1560,7 +1682,21 @@ class UniversalDownloaderApp(ctk.CTk):
             track_num = start_num + i
             cleaned = clean_filename(item['title'], track_num)
             ext_target = "mp4" if is_video else ("m4a" if download_type == "m4a" else "mp3")
-            filename_base = f"{track_num:03d} - {cleaned}" if total_queue > 1 else cleaned
+            track_prefix = f"{track_num:03d} - " if total_queue > 1 else ""
+
+            if is_video:
+                # Video files always carry their resolution profile tag for clean distinction
+                clean_title = re.sub(r'\s*\[(best|2160p?|4k|1440p?|1080p?|720p?|480p?|360p?|320k|192k|128k|m4a)\]$', '', cleaned, flags=re.IGNORECASE)
+                filename_base = f"{track_prefix}{clean_title} [{q_tag}]"
+            else:
+                # For audio: if an existing untagged file exists with different bitrate, tag it to avoid collision
+                plain_path = os.path.join(dest_dir, f"{track_prefix}{cleaned}.{ext_target}")
+                if os.path.exists(plain_path):
+                    clean_title = re.sub(r'\s*\[(320k|192k|128k|m4a)\]$', '', cleaned, flags=re.IGNORECASE)
+                    filename_base = f"{track_prefix}{clean_title} [{q_tag}]"
+                else:
+                    filename_base = f"{track_prefix}{cleaned}"
+
             full_target_path = os.path.join(dest_dir, f"{filename_base}.{ext_target}")
 
             # Register in Download Manager
@@ -1588,6 +1724,7 @@ class UniversalDownloaderApp(ctk.CTk):
                     'format': fmt_str,
                     'merge_output_format': 'mp4',
                     'outtmpl': os.path.join(dest_dir, f"{filename_base}.%(ext)s"),
+                    'overwrites': True,
                     'progress_hooks': [progress_hook],
                     'http_headers': {
                         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
@@ -1611,6 +1748,7 @@ class UniversalDownloaderApp(ctk.CTk):
                     'ffmpeg_location': FFMPEG_EXE,
                     'format': 'bestaudio/best',
                     'outtmpl': os.path.join(dest_dir, f"{filename_base}.%(ext)s"),
+                    'overwrites': True,
                     'progress_hooks': [progress_hook],
                     'postprocessors': postprocessors,
                     'postprocessor_args': postprocessor_args,

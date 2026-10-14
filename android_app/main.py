@@ -875,8 +875,22 @@ class HomeScreen(Screen):
             bitrate = "320" if self.selected_format == "mp3_320" else ("192" if self.selected_format == "mp3_192" else "128")
 
             title = self.active_analysis['title'] if self.active_analysis else f"{platform} Clip"
-            filename_base = engine.clean_filename(title, 1)
+            cleaned = engine.clean_filename(title, 1)
             ext_target = "mp4" if is_video else ("m4a" if self.selected_format == "m4a" else "mp3")
+
+            if is_video:
+                q_tag = "Best" if self.selected_format == "video_best" else "720p"
+                clean_title = re.sub(r'\s*\[(best|1080p?|720p?|480p?|320k|192k|128k|m4a)\]$', '', cleaned, flags=re.IGNORECASE)
+                filename_base = f"{clean_title} [{q_tag}]"
+            else:
+                q_tag = "320k" if self.selected_format == "mp3_320" else ("192k" if self.selected_format == "mp3_192" else ("m4a" if self.selected_format == "m4a" else "128k"))
+                plain_path = os.path.join(dest_dir, f"{cleaned}.{ext_target}")
+                if os.path.exists(plain_path):
+                    clean_title = re.sub(r'\s*\[(320k|192k|128k|m4a)\]$', '', cleaned, flags=re.IGNORECASE)
+                    filename_base = f"{clean_title} [{q_tag}]"
+                else:
+                    filename_base = cleaned
+
             full_path = os.path.join(dest_dir, f"{filename_base}.{ext_target}")
 
             Clock.schedule_once(lambda dt: self.app_ref.manager_screen.add_item(filename_base, "⏳ Downloading...", full_path, self.selected_format), 0)
@@ -896,13 +910,17 @@ class HomeScreen(Screen):
                         Clock.schedule_once(lambda dt: self.update_progress_ui(pct, speed_str, eta_str), 0)
 
             if is_video:
-                fmt_str = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best'
+                if self.selected_format == "video_720":
+                    fmt_str = 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=720]+bestaudio/best[height<=720]/best'
+                else:
+                    fmt_str = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best'
                 opts = {
                     'quiet': True,
                     'no_warnings': True,
                     'format': fmt_str,
                     'merge_output_format': 'mp4',
                     'outtmpl': os.path.join(dest_dir, f"{filename_base}.%(ext)s"),
+                    'overwrites': True,
                     'progress_hooks': [progress_hook],
                     'http_headers': {
                         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
@@ -915,6 +933,7 @@ class HomeScreen(Screen):
                     'no_warnings': True,
                     'format': 'bestaudio/best',
                     'outtmpl': os.path.join(dest_dir, f"{filename_base}.%(ext)s"),
+                    'overwrites': True,
                     'progress_hooks': [progress_hook],
                     'postprocessors': postprocessors,
                     'http_headers': {
