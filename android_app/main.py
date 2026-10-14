@@ -543,22 +543,18 @@ class HomeScreen(Screen):
         self.input_url.bind(text=self.on_url_text_change)
         card_input.add_widget(self.input_url)
 
-        # Quick Actions Toolbar (PASTE | CLEAN LINK | INSPECT | CLEAR)
-        actions_row = BoxLayout(orientation="horizontal", spacing=6, size_hint_y=None, height=36)
-        self.btn_paste = GoldButton(text="PASTE", is_outline=True, height_dp=36, size_hint_x=0.28, tooltip="Paste link from clipboard and automatically inspect it.")
+        # Quick Actions Toolbar (PASTE | INSPECT | CLEAR)
+        actions_row = BoxLayout(orientation="horizontal", spacing=8, size_hint_y=None, height=38)
+        self.btn_paste = GoldButton(text="PASTE", is_outline=True, height_dp=38, size_hint_x=0.34, tooltip="Paste link from clipboard and automatically inspect it.")
         self.btn_paste.bind(on_release=self.action_paste)
-        
-        self.btn_clean = GoldButton(text="CLEAN", is_outline=True, height_dp=36, size_hint_x=0.24, tooltip="Strip tracking IDs and playlist mix parameters from URL.")
-        self.btn_clean.bind(on_release=self.action_clean_url)
 
-        self.btn_inspect = GoldButton(text="INSPECT", is_outline=False, height_dp=36, size_hint_x=0.30, tooltip="Inspect link metadata, duration, track count, and size.")
+        self.btn_inspect = GoldButton(text="INSPECT", is_outline=False, height_dp=38, size_hint_x=0.42, tooltip="Inspect link metadata, duration, track count, and size.")
         self.btn_inspect.bind(on_release=self.action_inspect)
 
-        self.btn_clear = GoldButton(text="CLEAR", is_outline=True, height_dp=36, size_hint_x=0.18, tooltip="Clear URL input box and reset inspection results.")
+        self.btn_clear = GoldButton(text="CLEAR", is_outline=True, height_dp=38, size_hint_x=0.24, tooltip="Clear URL input box and reset inspection results.")
         self.btn_clear.bind(on_release=self.action_clear_input)
 
         actions_row.add_widget(self.btn_paste)
-        actions_row.add_widget(self.btn_clean)
         actions_row.add_widget(self.btn_inspect)
         actions_row.add_widget(self.btn_clear)
         card_input.add_widget(actions_row)
@@ -615,39 +611,99 @@ class HomeScreen(Screen):
         self.card_inspect.add_widget(row_chips)
         content.add_widget(self.card_inspect)
 
-        # Format Selector Card
-        card_format = CardBox(orientation="vertical", padding=12, spacing=8, size_hint_y=None, height=135)
+        # Luxury Output Format Specification Card
+        card_format = CardBox(orientation="vertical", padding=12, spacing=8, size_hint_y=None, height=185)
+
+        row_fmt_head = BoxLayout(orientation="horizontal", size_hint_y=None, height=30)
         lbl_fmt_head = Label(
-            text="SELECT OUTPUT PROFILE",
+            text="OUTPUT PROFILE",
             font_name=FONT_FAMILY,
-            font_size="12sp",
+            font_size="11sp",
             bold=True,
+            color=COLOR_TEXT_MUTED,
+            size_hint_x=1,
+            halign="left",
+            valign="middle"
+        )
+        lbl_fmt_head.bind(size=lbl_fmt_head.setter('text_size'))
+        row_fmt_head.add_widget(lbl_fmt_head)
+
+        # Gold Segmented Switcher ([ 🎬 VIDEO ] / [ ♫ AUDIO ])
+        box_switcher = BoxLayout(orientation="horizontal", spacing=4, size_hint=(None, None), size=(180, 28))
+        self.btn_mode_video = GoldButton(text="🎬 VIDEO", is_outline=False, height_dp=28, size_hint=(None, None), size=(88, 28), tooltip="Switch to MP4 Video quality profiles.")
+        self.btn_mode_video.lbl.font_size = "11sp"
+        self.btn_mode_video.bind(on_release=lambda *_: self.switch_mode("video"))
+
+        self.btn_mode_audio = GoldButton(text="♫ AUDIO", is_outline=True, height_dp=28, size_hint=(None, None), size=(88, 28), tooltip="Switch to MP3 & M4A Audio profiles.")
+        self.btn_mode_audio.lbl.font_size = "11sp"
+        self.btn_mode_audio.bind(on_release=lambda *_: self.switch_mode("audio"))
+
+        box_switcher.add_widget(self.btn_mode_video)
+        box_switcher.add_widget(self.btn_mode_audio)
+        row_fmt_head.add_widget(box_switcher)
+        card_format.add_widget(row_fmt_head)
+
+        # Video Formats Grid (2 cols x 2 rows, height 88dp)
+        self.grid_fmt_video = GridLayout(cols=2, spacing=6, size_hint_y=None, height=88)
+        # Audio Formats Grid (2 cols x 2 rows, height 88dp)
+        self.grid_fmt_audio = GridLayout(cols=2, spacing=6, size_hint_y=None, height=88)
+
+        self.fmt_buttons = {}
+        video_formats = [
+            ("video_best", "⚡ MP4 Best", "Highest available MP4 video (up to 4K / 1080p)."),
+            ("video_1080", "🎬 MP4 1080p", "Crisp 1080p Full HD video stream."),
+            ("video_720", "📺 MP4 720p", "720p HD MP4 video for fast download."),
+            ("video_480", "📱 MP4 480p", "480p SD MP4 video for data saving."),
+        ]
+        for key, name, tip in video_formats:
+            btn = GoldButton(text=name, is_outline=(key != self.selected_format), height_dp=41, tooltip=tip)
+            btn.lbl.font_size = "12.5sp"
+            btn.bind(on_release=lambda instance, k=key: self.select_format(k))
+            self.fmt_buttons[key] = btn
+            self.grid_fmt_video.add_widget(btn)
+
+        audio_formats = [
+            ("mp3_320", "💎 MP3 320k", "Maximum fidelity 320 kbps CBR MP3 audio stream."),
+            ("mp3_192", "🎵 MP3 192k", "Standard high-quality 192 kbps MP3 audio."),
+            ("mp3_128", "🚗 USB 128k", "128 kbps MP3 with clean metadata for car USB & players."),
+            ("m4a", "🎧 AAC M4A", "Untouched original AAC audio stream without transcoding."),
+        ]
+        for key, name, tip in audio_formats:
+            btn = GoldButton(text=name, is_outline=(key != self.selected_format), height_dp=41, tooltip=tip)
+            btn.lbl.font_size = "12.5sp"
+            btn.bind(on_release=lambda instance, k=key: self.select_format(k))
+            self.fmt_buttons[key] = btn
+            self.grid_fmt_audio.add_widget(btn)
+
+        self.format_slots_box = BoxLayout(orientation="vertical", size_hint_y=None, height=88)
+        self.format_slots_box.add_widget(self.grid_fmt_video)
+        card_format.add_widget(self.format_slots_box)
+
+        self.format_specs = {
+            "video_best": "[SPEC] Best Quality MP4 Video · Audio Muxed · Universal Codec Compatibility",
+            "video_1080": "[SPEC] 1080p Full HD MP4 · Crisp Resolution · Audio Muxed",
+            "video_720": "[SPEC] 720p HD MP4 · Balanced Quality & Fast Mobile Download",
+            "video_480": "[SPEC] 480p SD MP4 · Compact Size · Minimal Mobile Data",
+            "mp3_320": "[SPEC] 320 kbps Constant Bitrate MP3 · Studio Fidelity Stereo Audio",
+            "mp3_192": "[SPEC] 192 kbps High Quality MP3 · Clean Transcoding",
+            "mp3_128": "[SPEC] 128 kbps CBR MP3 · 44.1kHz Stereo · ID3v2.3 (Car & USB Ready)",
+            "m4a": "[SPEC] Original M4A / AAC Stream · Direct Stream Copy (No Transcoding)",
+        }
+
+        # Dynamic spec hint banner
+        self.lbl_format_spec = Label(
+            text=self.format_specs.get(self.selected_format, ""),
+            font_name=FONT_FAMILY,
+            font_size="10.5sp",
             color=COLOR_TEXT_MUTED,
             size_hint_y=None,
             height=18,
-            halign="left"
+            halign="left",
+            valign="middle"
         )
-        lbl_fmt_head.bind(size=lbl_fmt_head.setter('text_size'))
-        card_format.add_widget(lbl_fmt_head)
+        self.lbl_format_spec.bind(size=self.lbl_format_spec.setter('text_size'))
+        card_format.add_widget(self.lbl_format_spec)
 
-        grid_fmt = GridLayout(cols=3, spacing=6, size_hint_y=None, height=80)
-        self.fmt_buttons = {}
-        formats = [
-            ("video_best", "MP4 Best", "Download highest available MP4 video quality."),
-            ("video_720", "MP4 720p", "Download crisp 720p HD MP4 video for faster saving."),
-            ("mp3_320", "MP3 320k", "Extract maximum fidelity 320 kbps CBR MP3 audio stream."),
-            ("mp3_192", "MP3 192k", "Extract standard high-quality 192 kbps MP3 audio."),
-            ("mp3_128", "USB 128k", "Extract 128 kbps MP3 with clean filenames for car USB & players."),
-            ("m4a", "AAC M4A", "Extract untouched original AAC audio stream without transcoding."),
-        ]
-        for key, name, tip in formats:
-            btn = GoldButton(text=name, is_outline=(key != self.selected_format), height_dp=36, tooltip=tip)
-            btn.lbl.font_size = "13sp"
-            btn.bind(on_release=lambda instance, k=key: self.select_format(k))
-            self.fmt_buttons[key] = btn
-            grid_fmt.add_widget(btn)
-
-        card_format.add_widget(grid_fmt)
         content.add_widget(card_format)
 
         # Download HUD / Progress Card
@@ -689,11 +745,34 @@ class HomeScreen(Screen):
         root.add_widget(scroll)
         self.add_widget(root)
 
+    def switch_mode(self, mode):
+        self.current_mode = mode
+        if mode == "video":
+            self.btn_mode_video.set_outline(False)
+            self.btn_mode_audio.set_outline(True)
+            self.format_slots_box.clear_widgets()
+            self.format_slots_box.add_widget(self.grid_fmt_video)
+            if not self.selected_format.startswith("video_"):
+                self.select_format("video_best")
+            else:
+                self.select_format(self.selected_format)
+        else:
+            self.btn_mode_video.set_outline(True)
+            self.btn_mode_audio.set_outline(False)
+            self.format_slots_box.clear_widgets()
+            self.format_slots_box.add_widget(self.grid_fmt_audio)
+            if self.selected_format.startswith("video_"):
+                self.select_format("mp3_320")
+            else:
+                self.select_format(self.selected_format)
+
     def select_format(self, key):
         self.selected_format = key
         for k, btn in self.fmt_buttons.items():
             is_active = (k == key)
             btn.set_outline(not is_active)
+        if hasattr(self, 'lbl_format_spec') and hasattr(self, 'format_specs'):
+            self.lbl_format_spec.text = self.format_specs.get(key, "")
 
     def on_url_text_change(self, instance, text):
         t = text.strip()
@@ -879,7 +958,14 @@ class HomeScreen(Screen):
             ext_target = "mp4" if is_video else ("m4a" if self.selected_format == "m4a" else "mp3")
 
             if is_video:
-                q_tag = "Best" if self.selected_format == "video_best" else "720p"
+                if self.selected_format == "video_1080":
+                    q_tag = "1080p"
+                elif self.selected_format == "video_720":
+                    q_tag = "720p"
+                elif self.selected_format == "video_480":
+                    q_tag = "480p"
+                else:
+                    q_tag = "Best"
                 clean_title = re.sub(r'\s*\[(best|1080p?|720p?|480p?|320k|192k|128k|m4a)\]$', '', cleaned, flags=re.IGNORECASE)
                 filename_base = f"{clean_title} [{q_tag}]"
             else:
@@ -912,6 +998,10 @@ class HomeScreen(Screen):
             if is_video:
                 if self.selected_format == "video_720":
                     fmt_str = 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=720]+bestaudio/best[height<=720]/best'
+                elif self.selected_format == "video_480":
+                    fmt_str = 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=480]+bestaudio/best[height<=480]/best'
+                elif self.selected_format == "video_1080":
+                    fmt_str = 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best'
                 else:
                     fmt_str = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best'
                 opts = {

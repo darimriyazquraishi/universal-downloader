@@ -592,7 +592,7 @@ class UniversalDownloaderApp(ctk.CTk):
         self.entry_url.bind("<Return>", lambda _event: self.trigger_analyze())
 
         btn_paste = ctk.CTkButton(
-            url_row, text="PASTE", width=62, height=40, corner_radius=4,
+            url_row, text="PASTE", width=70, height=40, corner_radius=4,
             font=ctk.CTkFont(family=FONT_FAMILY, size=11, weight="bold"),
             fg_color=self.tokens["gold_subtle"], hover_color=self.tokens["gold_dark"],
             border_width=1, border_color=self.tokens["gold_border"],
@@ -601,18 +601,8 @@ class UniversalDownloaderApp(ctk.CTk):
         btn_paste.pack(side="left", padx=(0, 6))
         CTkTooltip(btn_paste, "Paste link from clipboard and automatically inspect metadata.")
 
-        btn_clean = ctk.CTkButton(
-            url_row, text="CLEAN", width=62, height=40, corner_radius=4,
-            font=ctk.CTkFont(family=FONT_FAMILY, size=11, weight="bold"),
-            fg_color=self.tokens["gold_subtle"], hover_color=self.tokens["gold_dark"],
-            border_width=1, border_color=self.tokens["gold_border"],
-            text_color=self.tokens["gold_bright"], command=self.clean_url_input
-        )
-        btn_clean.pack(side="left", padx=(0, 6))
-        CTkTooltip(btn_clean, "Strip tracking parameters, timestamps, and radio mix tokens from URL.")
-
         self.btn_analyze = ctk.CTkButton(
-            url_row, text="INSPECT", width=86, height=40, corner_radius=4,
+            url_row, text="INSPECT", width=92, height=40, corner_radius=4,
             font=ctk.CTkFont(family=FONT_FAMILY, size=11, weight="bold"),
             fg_color=self.tokens["gold_subtle"], hover_color=self.tokens["gold_dark"],
             border_width=1, border_color=self.tokens["gold_border_bright"],
@@ -622,7 +612,7 @@ class UniversalDownloaderApp(ctk.CTk):
         CTkTooltip(self.btn_analyze, "Inspect link metadata, duration, track count, and estimated file size.")
 
         btn_clear = ctk.CTkButton(
-            url_row, text="CLEAR", width=58, height=40, corner_radius=4,
+            url_row, text="CLEAR", width=64, height=40, corner_radius=4,
             font=ctk.CTkFont(family=FONT_FAMILY, size=11, weight="bold"),
             fg_color=self.tokens["gold_subtle"], hover_color=self.tokens["gold_dark"],
             border_width=1, border_color=self.tokens["gold_border"],
