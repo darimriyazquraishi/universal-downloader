@@ -729,7 +729,7 @@ class UniversalDownloaderApp(ctk.CTk):
         self.combo_format.set("MP4 Video · Best Available Quality")
 
         self.lbl_format_hint = ctk.CTkLabel(
-            controls_panel, text="[SPEC] Best Quality MP4 Video · Audio Muxed · Universal Codec Compatibility",
+            controls_panel, text="Best Quality MP4 Video · Audio Muxed · Universal Codec Compatibility",
             font=ctk.CTkFont(family=FONT_FAMILY, size=10), text_color=self.tokens["text_muted"], anchor="w"
         )
         self.lbl_format_hint.pack(fill="x", pady=(0, 10))
@@ -1172,17 +1172,17 @@ class UniversalDownloaderApp(ctk.CTk):
 
         if selected_code.startswith("video_"):
             self.lbl_format_hint.configure(
-                text=f"[SPEC] {selected_code.replace('video_', '').upper()} MP4 Video · Audio Muxed · Universal Codec Compatibility"
+                text=f"{selected_code.replace('video_', '').upper()} MP4 Video · Audio Muxed · Universal Codec Compatibility"
             )
         else:
             if selected_code == "mp3_speaker":
                 self.lbl_format_hint.configure(
-                    text="[SPEC] 128k Constant Bitrate · 44.1kHz Stereo · Stripped Artwork · FAT32 Clean Filenames"
+                    text="128k Constant Bitrate · 44.1kHz Stereo · Stripped Artwork · FAT32 Clean Filenames"
                 )
             elif selected_code == "m4a":
-                self.lbl_format_hint.configure(text="[SPEC] Original AAC Audio Stream · Direct Demux without Re-encoding")
+                self.lbl_format_hint.configure(text="Original AAC Audio Stream · Direct Demux without Re-encoding")
             else:
-                self.lbl_format_hint.configure(text=f"[SPEC] MP3 High Fidelity · {selected_code.replace('mp3_', '')} kbps CBR · 44.1kHz Stereo")
+                self.lbl_format_hint.configure(text=f"MP3 High Fidelity · {selected_code.replace('mp3_', '')} kbps CBR · 44.1kHz Stereo")
 
         if self.current_analysis:
             self.update_analysis_meta(self.current_analysis)

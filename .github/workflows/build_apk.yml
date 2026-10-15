@@ -55,16 +55,17 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: github.ref == 'refs/heads/main'
         with:
-          tag_name: v1.0.3-mobile
-          name: Universal Downloader Android APK v1.0.3
+          tag_name: v1.0.4-mobile
+          name: Universal Downloader Android APK v1.0.4
           body: |
-            ### 📱 Universal Downloader for Android (v1.0.3)
-            - **Updated Visual Identity**: Upgraded launcher icon and presplash from latest favicon asset bundle.
-            - **Instant Touch Response**: Zero-delay button and tab responses.
+            ### 📱 Universal Downloader for Android (v1.0.4)
+            - **Swipe Gesture Navigation**: Smooth left/right horizontal swipe between Downloader, Manager, and Settings tabs with direction-aware slide animations.
+            - **Clean UI**: Removed verbose engine specification cards and banners for a sleek, distraction-free interface.
+            - **Updated Visual Identity**: Latest launcher icon and presplash from favicon bundle.
+            - **Instant Touch Response**: Zero-delay responsive button taps and active tab synchronisation.
             - **Dynamic Density Scaling**: Full `dp`/`sp` layout sizing preventing notch clipping and text collisions.
-            - **Output Profiles**: Crisp `VIDEO` & `AUDIO` segmented switcher with perfectly sized 2×2 touch targets.
             - **Universal Media Engine**: Direct video and audio downloads from YouTube, Instagram, TikTok, Facebook, X, and more.
-            - **Android Share Sheet**: Share links directly from any browser or social app into Universal Downloader
+            - **Android Share Sheet**: Share links directly from any browser or social app into Universal Downloader.
           files: android_app/bin/*.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

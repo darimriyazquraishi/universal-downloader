@@ -487,31 +487,6 @@ class HomeScreen(Screen):
         self.format_slots_box.add_widget(self.grid_fmt_video)
         card_format.add_widget(self.format_slots_box)
 
-        self.format_specs = {
-            "video_best": "[SPEC] Best Quality MP4 Video · Audio Muxed · Universal Codec Compatibility",
-            "video_1080": "[SPEC] 1080p Full HD MP4 · Crisp Resolution · Audio Muxed",
-            "video_720": "[SPEC] 720p HD MP4 · Balanced Quality & Fast Mobile Download",
-            "video_480": "[SPEC] 480p SD MP4 · Compact Size · Minimal Mobile Data",
-            "mp3_320": "[SPEC] 320 kbps Constant Bitrate MP3 · Studio Fidelity Stereo Audio",
-            "mp3_192": "[SPEC] 192 kbps High Quality MP3 · Clean Transcoding",
-            "mp3_128": "[SPEC] 128 kbps CBR MP3 · 44.1kHz Stereo · ID3v2.3 (Car & USB Ready)",
-            "m4a": "[SPEC] Original M4A / AAC Stream · Direct Stream Copy (No Transcoding)",
-        }
-
-        # Dynamic spec hint banner
-        self.lbl_format_spec = Label(
-            text=self.format_specs.get(self.selected_format, ""),
-            font_name=FONT_FAMILY,
-            font_size="10.5sp",
-            color=COLOR_TEXT_MUTED,
-            size_hint_y=None,
-            height=dp(28),
-            halign="left",
-            valign="middle"
-        )
-        self.lbl_format_spec.bind(size=self.lbl_format_spec.setter('text_size'))
-        card_format.add_widget(self.lbl_format_spec)
-
         content.add_widget(card_format)
 
         # Download HUD / Progress Card
@@ -583,8 +558,6 @@ class HomeScreen(Screen):
         for k, btn in self.fmt_buttons.items():
             is_active = (k == key)
             btn.set_outline(not is_active)
-        if hasattr(self, 'lbl_format_spec') and hasattr(self, 'format_specs'):
-            self.lbl_format_spec.text = self.format_specs.get(key, "")
 
     def on_url_text_change(self, instance, text):
         t = text.strip()
@@ -1149,33 +1122,6 @@ class SettingsScreen(Screen):
         card_dups.add_widget(row_limit)
         content.add_widget(card_dups)
 
-        # Engine Info Card
-        card_info = CardBox(orientation="vertical", padding=dp(12), spacing=dp(6), size_hint_y=None)
-        card_info.bind(minimum_height=card_info.setter('height'))
-        lbl_info_head = Label(
-            text="ENGINE SPECIFICATIONS",
-            font_name=FONT_FAMILY,
-            font_size="11.5sp",
-            bold=True,
-            color=COLOR_GOLD,
-            size_hint_y=None,
-            height=dp(20),
-            halign="left",
-            valign="middle"
-        )
-        lbl_info_head.bind(size=lbl_info_head.setter('text_size'))
-        lbl_info1 = Label(text="Core Engine: yt-dlp + FFmpeg", font_name=FONT_FAMILY, font_size="12sp", color=COLOR_TEXT_WHITE, size_hint_y=None, height=dp(20), halign="left", valign="middle")
-        lbl_info1.bind(size=lbl_info1.setter('text_size'))
-        lbl_info2 = Label(text="Platforms: YouTube, Instagram, TikTok, X, FB, Reddit", font_name=FONT_FAMILY, font_size="11sp", color=COLOR_TEXT_MUTED, size_hint_y=None, height=dp(20), halign="left", valign="middle")
-        lbl_info2.bind(size=lbl_info2.setter('text_size'))
-        lbl_info3 = Label(text="Smart Mix Filter: Auto-extract single video from YouTube Mixes", font_name=FONT_FAMILY, font_size="11sp", color=COLOR_TEXT_MUTED, size_hint_y=None, height=dp(20), halign="left", valign="middle")
-        lbl_info3.bind(size=lbl_info3.setter('text_size'))
-        card_info.add_widget(lbl_info_head)
-        card_info.add_widget(lbl_info1)
-        card_info.add_widget(lbl_info2)
-        card_info.add_widget(lbl_info3)
-        content.add_widget(card_info)
-
         # Transition Style Card
         card_trans = CardBox(orientation="vertical", padding=dp(12), spacing=dp(8), size_hint_y=None)
         card_trans.bind(minimum_height=card_trans.setter('height'))
@@ -1298,11 +1244,94 @@ class UniversalDownloaderMobileApp(App):
         self.nav_home.set_active(True)
         self.master_layout.add_widget(self.sm)
         self.master_layout.add_widget(self.nav_bar)
+
+        # Global window touch handlers for seamless horizontal swipe tab switching
+        Window.bind(on_touch_down=self._on_window_touch_down)
+        Window.bind(on_touch_move=self._on_window_touch_move)
+        Window.bind(on_touch_up=self._on_window_touch_up)
+
         Clock.schedule_once(self.check_android_share_intent, 0.5)
 
         return self.master_layout
 
-    def switch_screen(self, screen_name):
+    def _on_window_touch_down(self, win, touch):
+        # Ignore touches on or below the bottom navigation bar (height dp(64) + padding)
+        if touch.y <= dp(68):
+            return False
+
+        # Ignore touches inside the media URL input box so cursor selection is preserved
+        if hasattr(self, 'home_screen') and hasattr(self.home_screen, 'input_url'):
+            try:
+                if self.home_screen.input_url.collide_point(touch.x, touch.y):
+                    return False
+            except Exception:
+                pass
+
+        touch.ud['tab_swipe_origin'] = (touch.x, touch.y)
+        touch.ud['tab_swipe_switched'] = False
+        return False
+
+    def _on_window_touch_move(self, win, touch):
+        if touch.ud.get('tab_swipe_switched', False):
+            return False
+        origin = touch.ud.get('tab_swipe_origin')
+        if not origin:
+            return False
+
+        dx = touch.x - origin[0]
+        dy = touch.y - origin[1]
+        threshold = dp(45)
+
+        # Ensure clear horizontal dominance so vertical list scrolling is never impeded
+        if abs(dx) >= threshold and abs(dx) > 1.35 * abs(dy):
+            self._handle_tab_swipe(dx, touch)
+            return False
+        return False
+
+    def _on_window_touch_up(self, win, touch):
+        if touch.ud.get('tab_swipe_switched', False):
+            return False
+        origin = touch.ud.get('tab_swipe_origin')
+        if not origin:
+            return False
+
+        dx = touch.x - origin[0]
+        dy = touch.y - origin[1]
+        threshold = dp(35)
+
+        if abs(dx) >= threshold and abs(dx) > 1.35 * abs(dy):
+            self._handle_tab_swipe(dx, touch)
+            return False
+        return False
+
+    def _handle_tab_swipe(self, dx, touch):
+        touch.ud['tab_swipe_switched'] = True
+
+        # Ungrab buttons to cancel accidental button taps during swipe
+        for item in list(touch.grab_list):
+            try:
+                touch.ungrab(item)
+                if hasattr(item, 'state'):
+                    item.state = 'normal'
+            except Exception:
+                pass
+
+        order = ["home", "manager", "settings"]
+        curr = self.sm.current
+        if curr not in order:
+            return
+        idx = order.index(curr)
+
+        if dx < 0 and idx < len(order) - 1:
+            # Swipe LEFT -> advance to next screen (Downloader -> Manager -> Settings)
+            next_screen = order[idx + 1]
+            self.switch_screen(next_screen, direction="left")
+        elif dx > 0 and idx > 0:
+            # Swipe RIGHT -> go back to previous screen (Settings -> Manager -> Downloader)
+            prev_screen = order[idx - 1]
+            self.switch_screen(prev_screen, direction="right")
+
+    def switch_screen(self, screen_name, direction=None):
         curr_screen = self.sm.current
         if curr_screen == screen_name:
             return
@@ -1316,14 +1345,17 @@ class UniversalDownloaderMobileApp(App):
         if hasattr(self, 'settings_screen') and hasattr(self.settings_screen, 'cfg'):
             cfg_style = self.settings_screen.cfg.get("transition_style", "slide")
 
-        if cfg_style == "fade":
+        if cfg_style == "fade" and direction is None:
             if not isinstance(self.sm.transition, FadeTransition):
                 self.sm.transition = FadeTransition(duration=0.20)
         else:
-            # Default: Smooth Direction-Aware Slide (left if going forward, right if going back)
+            # Default or gesture swipe: Smooth Direction-Aware Slide (left if going forward, right if going back)
             if not isinstance(self.sm.transition, SlideTransition):
                 self.sm.transition = SlideTransition(duration=0.25)
-            self.sm.transition.direction = "left" if new_idx > curr_idx else "right"
+            if direction:
+                self.sm.transition.direction = direction
+            else:
+                self.sm.transition.direction = "left" if new_idx > curr_idx else "right"
 
         self.sm.current = screen_name
         self.nav_home.set_active(screen_name == "home")
