@@ -654,9 +654,14 @@ class HomeScreen(Screen):
         try:
             from kivy.core.clipboard import Clipboard
             txt = Clipboard.paste()
-            if txt and txt.strip().startswith(('http://', 'https://')):
-                self.input_url.text = txt.strip()
-                self.action_inspect()
+            if txt:
+                clean_txt = txt.strip()
+                urls = re.findall(r'https?://[^\s<>"\'\)]+', clean_txt)
+                if urls:
+                    self.input_url.text = urls[0]
+                    self.action_inspect()
+                else:
+                    self.input_url.text = clean_txt
         except Exception:
             pass
 
@@ -1472,12 +1477,8 @@ class UniversalDownloaderMobileApp(App):
 
         if IS_ANDROID:
             try:
-                perms = [
-                    Permission.INTERNET,
-                    Permission.READ_EXTERNAL_STORAGE,
-                    Permission.WRITE_EXTERNAL_STORAGE
-                ]
-                for p_name in ['READ_MEDIA_VIDEO', 'READ_MEDIA_AUDIO']:
+                perms = [Permission.INTERNET]
+                for p_name in ['READ_MEDIA_VIDEO', 'READ_MEDIA_AUDIO', 'READ_EXTERNAL_STORAGE']:
                     if hasattr(Permission, p_name):
                         perms.append(getattr(Permission, p_name))
                 request_permissions(perms)

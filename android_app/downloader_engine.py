@@ -197,34 +197,14 @@ def load_history():
             pass
         return []
 
-    # First launch seeding: include only app-downloaded media, strictly excluding system/trash/Reddit
-    seeded = []
+    # First launch: initialize clean empty history
     try:
-        pub = get_public_download_dir()
-        if os.path.isdir(pub):
-            for f in os.listdir(pub):
-                fl = f.lower()
-                if fl.startswith(('.', 'rdt_', 'screenshot', 'screen_recording', 'vid_', 'img_')):
-                    continue
-                if fl.endswith(('.mp4', '.mp3', '.m4a', '.webm')):
-                    full_f = os.path.join(pub, f)
-                    if os.path.isfile(full_f):
-                        name_base = os.path.splitext(f)[0]
-                        fmt_tag = "MP4" if fl.endswith(('.mp4', '.webm')) else "MP3"
-                        seeded.append({
-                            "name": name_base,
-                            "path": full_f,
-                            "format": fmt_tag,
-                            "time": os.path.getmtime(full_f)
-                        })
-            seeded.sort(key=lambda x: x["time"], reverse=True)
-            seeded = seeded[:20]
-            os.makedirs(os.path.dirname(p), exist_ok=True)
-            with open(p, "w", encoding="utf-8") as out_f:
-                json.dump(seeded, out_f, indent=2)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w", encoding="utf-8") as out_f:
+            json.dump([], out_f, indent=2)
     except Exception:
         pass
-    return seeded
+    return []
 
 def add_to_history(name, path, fmt_tag="MP4"):
     """Record an item downloaded by this app."""

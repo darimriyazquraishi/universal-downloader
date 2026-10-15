@@ -25,7 +25,7 @@ icon.filename = %(source.dir)s/assets/icon.png
 presplash.filename = %(source.dir)s/assets/icon.png
 
 # (str) Application versioning
-version = 1.0.10
+version = 1.1.0
 
 # (list) Application requirements
 # comma separated e.g. requirements = sqlite3,kivy
@@ -35,7 +35,10 @@ requirements = python3,kivy,openssl,yt-dlp,requests,certifi,mutagen,urllib3,char
 orientation = portrait
 
 # (list) Permissions
-android.permissions = INTERNET,ACCESS_NETWORK_STATE,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,READ_MEDIA_VIDEO,READ_MEDIA_AUDIO
+android.permissions = INTERNET,ACCESS_NETWORK_STATE,READ_MEDIA_VIDEO,READ_MEDIA_AUDIO
+
+# (str) Format of artifact to build (apk, aab)
+android.release_artifact = apk
 
 # (bool) Automatically accept SDK license agreements
 android.accept_sdk_license = True
