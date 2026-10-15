@@ -55,13 +55,14 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: github.ref == 'refs/heads/main'
         with:
-          tag_name: v1.0.1-mobile
-          name: Universal Downloader Android APK v1.0.1
+          tag_name: v1.0.2-mobile
+          name: Universal Downloader Android APK v1.0.2
           body: |
-            ### 📱 Universal Downloader for Android (v1.0.0)
-            - **Design**: Dark Obsidian & Radiant Gold luxury aesthetic
-            - **Universal Engine**: Downloads video and audio from YouTube, Instagram, TikTok, Facebook, X, and more
-            - **Output Profiles**: Separate Video (`MP4 Best`, `MP4 1080p`, `MP4 720p`, `MP4 480p`) & Audio (`MP3 320k`, `MP3 192k`, `USB 128k`, `AAC M4A`)
+            ### 📱 Universal Downloader for Android (v1.0.2)
+            - **Instant Touch Response**: Removed all long-press delays and tooltips for smooth, rapid button interaction.
+            - **Dynamic Density Scaling**: Full `dp`/`sp` layout sizing preventing notch clipping and text collisions.
+            - **Output Profiles**: Crisp `VIDEO` & `AUDIO` segmented switcher with perfectly sized 2×2 touch targets.
+            - **Universal Media Engine**: Direct video and audio downloads from YouTube, Instagram, TikTok, Facebook, X, and more.
             - **Android Share Sheet**: Share links directly from any browser or social app into Universal Downloader
           files: android_app/bin/*.apk
         env:

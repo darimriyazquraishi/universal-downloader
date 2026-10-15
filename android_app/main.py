@@ -141,96 +141,17 @@ class CardBox(BoxLayout):
         self.rect_border.rounded_rectangle = (self.pos[0], self.pos[1], self.size[0], self.size[1], self.radius)
 
 
-class TooltipToast(BoxLayout):
-    """Floating premium gold-accented tooltip HUD toast."""
-    def __init__(self, **kwargs):
-        kwargs['size_hint'] = (None, None)
-        super().__init__(**kwargs)
-        self.orientation = "horizontal"
-        self.padding = [dp(14), dp(8)]
-        self.spacing = dp(10)
-        self.opacity = 0
-        self.height = dp(46)
-        self.width = dp(340)
-        self.auto_dismiss_event = None
-
-        with self.canvas.before:
-            Color(0.08, 0.08, 0.12, 0.96)
-            self.rect_bg = RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(12)])
-            Color(*COLOR_GOLD)
-            self.rect_border = Line(rounded_rectangle=(self.pos[0], self.pos[1], self.size[0], self.size[1], dp(12)), width=dp(1.3))
-        self.bind(pos=self._update_canvas, size=self._update_canvas)
-
-        self.lbl_badge = Label(
-            text="INFO",
-            font_name=FONT_FAMILY,
-            font_size="10.5sp",
-            bold=True,
-            color=COLOR_GOLD,
-            size_hint_x=None,
-            width=dp(38)
-        )
-        self.lbl_text = Label(
-            text="",
-            font_name=FONT_FAMILY,
-            font_size="11.5sp",
-            color=COLOR_TEXT_WHITE,
-            halign="left",
-            valign="middle"
-        )
-        self.lbl_text.bind(size=self.lbl_text.setter('text_size'))
-        self.add_widget(self.lbl_badge)
-        self.add_widget(self.lbl_text)
-
-    def _update_canvas(self, *args):
-        self.rect_bg.pos = self.pos
-        self.rect_bg.size = self.size
-        self.rect_border.rounded_rectangle = (self.pos[0], self.pos[1], self.size[0], self.size[1], dp(12))
-
-    def show(self, text, duration=3.5):
-        if not text:
-            return
-        if self.auto_dismiss_event:
-            Clock.unschedule(self.auto_dismiss_event)
-            self.auto_dismiss_event = None
-
-        self.lbl_text.text = text
-        win_w = Window.width if Window.width > 0 else dp(412)
-        self.width = min(win_w - dp(32), dp(360))
-        self.x = (win_w - self.width) / 2
-        self.y = dp(78)
-
-        Animation.stop_all(self)
-        anim = Animation(opacity=1.0, duration=0.15)
-        anim.start(self)
-
-        self.auto_dismiss_event = Clock.schedule_once(lambda dt: self.hide(), duration)
-
-    def hide(self):
-        if self.auto_dismiss_event:
-            Clock.unschedule(self.auto_dismiss_event)
-            self.auto_dismiss_event = None
-        Animation.stop_all(self)
-        anim = Animation(opacity=0.0, duration=0.2)
-        anim.start(self)
-
 
 class GoldButton(ButtonBehavior, BoxLayout):
-    """Modern gold touch button with tactile feedback and 2s tooltip on long-press or hover."""
+    """Modern gold touch button with tactile feedback."""
     def __init__(self, text="", is_outline=False, height_dp=48, tooltip="", **kwargs):
         kwargs['size_hint_y'] = None
         kwargs['height'] = dp(height_dp)
         super().__init__(**kwargs)
         self.text = text
         self.is_outline = is_outline
-        self.tooltip = tooltip
         self.orientation = "horizontal"
         self.padding = [dp(8), dp(4)]
-
-        self._press_clock = None
-        self._hover_clock = None
-        self._is_hovered = False
-        self._did_long_press = False
 
         self.normal_bg = [0, 0, 0, 0] if is_outline else COLOR_GOLD
         self.pressed_bg = [0.83, 0.69, 0.22, 0.2] if is_outline else COLOR_GOLD_LIGHT
@@ -254,8 +175,6 @@ class GoldButton(ButtonBehavior, BoxLayout):
         )
         self.lbl.bind(size=self.lbl.setter('text_size'))
         self.add_widget(self.lbl)
-
-        Window.bind(mouse_pos=self._on_mouse_pos)
 
     def _update_canvas(self, *args):
         self.rect.pos = self.pos
@@ -284,84 +203,17 @@ class GoldButton(ButtonBehavior, BoxLayout):
         self.text = text
         self.lbl.text = text
 
-    def on_touch_down(self, touch):
-        if not self.collide_point(*touch.pos):
-            return False
-        self._did_long_press = False
-        if self.tooltip:
-            if self._press_clock:
-                Clock.unschedule(self._press_clock)
-            self._press_clock = Clock.schedule_once(self._on_long_press_fired, 1.8)
-        return super().on_touch_down(touch)
-
-    def on_touch_move(self, touch):
-        if self._press_clock and not self.collide_point(*touch.pos):
-            Clock.unschedule(self._press_clock)
-            self._press_clock = None
-        return super().on_touch_move(touch)
-
-    def on_touch_up(self, touch):
-        if self._press_clock:
-            Clock.unschedule(self._press_clock)
-            self._press_clock = None
-        if self._did_long_press:
-            if touch.grab_current is self:
-                touch.ungrab(self)
-            self.canvas_bg.rgba = self.normal_bg
-            self._did_long_press = False
-            return True
-        return super().on_touch_up(touch)
-
-    def _on_long_press_fired(self, dt):
-        self._did_long_press = True
-        self._press_clock = None
-        if self.tooltip:
-            app = App.get_running_app()
-            if app and hasattr(app, 'show_tooltip'):
-                app.show_tooltip(self.tooltip)
-
-    def _on_mouse_pos(self, window, pos):
-        if not self.tooltip or not self.get_root_window():
-            return
-        inside = self.collide_point(*pos) and self.opacity > 0
-        if inside:
-            if not self._is_hovered:
-                self._is_hovered = True
-                self._hover_clock = Clock.schedule_once(self._on_hover_fired, 2.0)
-        else:
-            if self._is_hovered:
-                self._is_hovered = False
-                if self._hover_clock:
-                    Clock.unschedule(self._hover_clock)
-                    self._hover_clock = None
-                app = App.get_running_app()
-                if app and hasattr(app, 'hide_tooltip'):
-                    app.hide_tooltip()
-
-    def _on_hover_fired(self, dt):
-        self._hover_clock = None
-        if self._is_hovered and self.tooltip:
-            app = App.get_running_app()
-            if app and hasattr(app, 'show_tooltip'):
-                app.show_tooltip(self.tooltip)
-
 
 class NavButton(ButtonBehavior, BoxLayout):
-    """Bottom navigation bar button with 2s tooltip on long-press or hover."""
+    """Bottom navigation bar button."""
     def __init__(self, title="", icon_type="download", target_screen="", tooltip="", app_ref=None, **kwargs):
         super().__init__(**kwargs)
         self.orientation = "vertical"
         self.target_screen = target_screen
         self.app_ref = app_ref
-        self.tooltip = tooltip
         self.padding = [dp(2), dp(4)]
         self.spacing = dp(2)
         self.is_active = False
-
-        self._press_clock = None
-        self._hover_clock = None
-        self._is_hovered = False
-        self._did_long_press = False
 
         self.box_icon = AnchorLayout(size_hint_y=0.6, anchor_x="center", anchor_y="center")
         with self.box_icon.canvas.before:
@@ -382,8 +234,6 @@ class NavButton(ButtonBehavior, BoxLayout):
         )
         self.add_widget(self.lbl_text)
 
-        Window.bind(mouse_pos=self._on_mouse_pos)
-
     def _update_pill(self, *args):
         pw, ph = dp(54), dp(28)
         self.pill_rect.pos = (self.box_icon.x + (self.box_icon.width - pw) / 2, self.box_icon.y + (self.box_icon.height - ph) / 2)
@@ -397,7 +247,6 @@ class NavButton(ButtonBehavior, BoxLayout):
         if active:
             Animation(rgba=[0.83, 0.69, 0.22, 0.18], duration=0.22, t='out_quad').start(self.pill_col)
             self.lbl_text.color = COLOR_GOLD
-            # Subtle bounce micro-animation on icon
             anim_bounce = Animation(size=(dp(23), dp(23)), duration=0.09, t='out_quad') + Animation(size=(dp(20), dp(20)), duration=0.12, t='in_out_quad')
             anim_bounce.start(self.v_icon)
         else:
@@ -407,61 +256,6 @@ class NavButton(ButtonBehavior, BoxLayout):
     def on_release(self):
         if self.app_ref:
             self.app_ref.switch_screen(self.target_screen)
-
-    def on_touch_down(self, touch):
-        if not self.collide_point(*touch.pos):
-            return False
-        self._did_long_press = False
-        if self.tooltip:
-            if self._press_clock:
-                Clock.unschedule(self._press_clock)
-            self._press_clock = Clock.schedule_once(self._on_long_press_fired, 1.8)
-        return super().on_touch_down(touch)
-
-    def on_touch_move(self, touch):
-        if self._press_clock and not self.collide_point(*touch.pos):
-            Clock.unschedule(self._press_clock)
-            self._press_clock = None
-        return super().on_touch_move(touch)
-
-    def on_touch_up(self, touch):
-        if self._press_clock:
-            Clock.unschedule(self._press_clock)
-            self._press_clock = None
-        if self._did_long_press:
-            if touch.grab_current is self:
-                touch.ungrab(self)
-            self._did_long_press = False
-            return True
-        return super().on_touch_up(touch)
-
-    def _on_long_press_fired(self, dt):
-        self._did_long_press = True
-        self._press_clock = None
-        if self.tooltip and self.app_ref:
-            self.app_ref.show_tooltip(self.tooltip)
-
-    def _on_mouse_pos(self, window, pos):
-        if not self.tooltip or not self.get_root_window():
-            return
-        inside = self.collide_point(*pos) and self.opacity > 0
-        if inside:
-            if not self._is_hovered:
-                self._is_hovered = True
-                self._hover_clock = Clock.schedule_once(self._on_hover_fired, 2.0)
-        else:
-            if self._is_hovered:
-                self._is_hovered = False
-                if self._hover_clock:
-                    Clock.unschedule(self._hover_clock)
-                    self._hover_clock = None
-                if self.app_ref:
-                    self.app_ref.hide_tooltip()
-
-    def _on_hover_fired(self, dt):
-        self._hover_clock = None
-        if self._is_hovered and self.tooltip and self.app_ref:
-            self.app_ref.show_tooltip(self.tooltip)
 
 
 # ==========================================================
@@ -1502,24 +1296,11 @@ class UniversalDownloaderMobileApp(App):
         self.nav_bar.add_widget(self.nav_mgr)
         self.nav_bar.add_widget(self.nav_set)
         self.nav_home.set_active(True)
-
-        self.tooltip_toast = TooltipToast()
-
         self.master_layout.add_widget(self.sm)
         self.master_layout.add_widget(self.nav_bar)
-        self.master_layout.add_widget(self.tooltip_toast)
-
         Clock.schedule_once(self.check_android_share_intent, 0.5)
 
         return self.master_layout
-
-    def show_tooltip(self, text):
-        if hasattr(self, 'tooltip_toast'):
-            self.tooltip_toast.show(text)
-
-    def hide_tooltip(self):
-        if hasattr(self, 'tooltip_toast'):
-            self.tooltip_toast.hide()
 
     def switch_screen(self, screen_name):
         curr_screen = self.sm.current
