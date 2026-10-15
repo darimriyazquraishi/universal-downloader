@@ -9,6 +9,43 @@ import unicodedata
 import urllib.parse
 import yt_dlp
 
+# Safeguard Kivy ProcessingStream buffer attribute so yt-dlp never encounters 'str' object has no attribute 'write'
+try:
+    from kivy.logger import ProcessingStream
+    class _BufferProxy:
+        def __init__(self, ps):
+            self.ps = ps
+        def write(self, b):
+            try:
+                if isinstance(b, bytes):
+                    b = b.decode('utf-8', 'replace')
+                return self.ps.write(b)
+            except Exception:
+                return 0
+        def flush(self):
+            try:
+                return self.ps.flush()
+            except Exception:
+                pass
+
+    ProcessingStream._line_accumulator = ''
+    def _safe_write(self, s):
+        try:
+            if isinstance(s, bytes):
+                s = s.decode('utf-8', 'replace')
+            s = getattr(self, '_line_accumulator', '') + s
+            lines = s.split('\n')
+            for line in lines[:-1]:
+                self.func('%s: %s' % (self.channel, line))
+            self._line_accumulator = lines[-1]
+        except Exception:
+            pass
+
+    ProcessingStream.write = _safe_write
+    ProcessingStream.buffer = property(lambda self: _BufferProxy(self))
+except Exception:
+    pass
+
 try:
     from jnius import autoclass
     Environment = autoclass('android.os.Environment')
@@ -250,7 +287,14 @@ def inspect_url(url, scope=None):
 
     ydl_opts = {
         'quiet': True,
-        'extract_flat': (active_scope == "playlist"), # Fast list extraction if playlist
+        'no_warnings': True,
+        'nocheckcertificate': True,
+        'extract_flat': (active_scope == "playlist"),
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['android', 'ios', 'web']
+            }
+        },
         'http_headers': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
         }

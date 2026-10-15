@@ -16,6 +16,43 @@ Config.set('graphics', 'resizable', '1')
 Config.set('input', 'mouse', 'mouse,multitouch_on_demand')
 
 import kivy
+# Ensure Kivy's ProcessingStream never breaks yt-dlp logger and error reporting
+try:
+    from kivy.logger import ProcessingStream
+    class _BufferProxy:
+        def __init__(self, ps):
+            self.ps = ps
+        def write(self, b):
+            try:
+                if isinstance(b, bytes):
+                    b = b.decode('utf-8', 'replace')
+                return self.ps.write(b)
+            except Exception:
+                return 0
+        def flush(self):
+            try:
+                return self.ps.flush()
+            except Exception:
+                pass
+
+    ProcessingStream._line_accumulator = ''
+    def _safe_ps_write(self, s):
+        try:
+            if isinstance(s, bytes):
+                s = s.decode('utf-8', 'replace')
+            s = getattr(self, '_line_accumulator', '') + s
+            lines = s.split('\n')
+            for line in lines[:-1]:
+                self.func('%s: %s' % (self.channel, line))
+            self._line_accumulator = lines[-1]
+        except Exception:
+            pass
+
+    ProcessingStream.write = _safe_ps_write
+    ProcessingStream.buffer = property(lambda self: _BufferProxy(self))
+except Exception:
+    pass
+
 from kivy.app import App
 from kivy.core.window import Window
 from kivy.metrics import dp, sp
@@ -620,86 +657,102 @@ class HomeScreen(Screen):
         threading.Thread(target=worker, daemon=True).start()
 
     def on_inspect_success(self, res):
-        self.active_analysis = res
-        self.single_cache = res
-        self.btn_inspect.set_text("INSPECT")
-        
-        # Configure badge
-        badge_txt = f"VERIFIED {res['platform'].upper()}"
-        if res.get("is_mix"):
-            badge_txt = "VERIFIED YOUTUBE (MIX DETECTED)"
-        elif res.get("has_both"):
-            badge_txt = "VERIFIED YOUTUBE (VIDEO + PLAYLIST)"
-        self.badge_platform.text = badge_txt
+        try:
+            self.active_analysis = res
+            self.single_cache = res
+            self.btn_inspect.set_text("INSPECT")
+            
+            # Configure badge
+            badge_txt = f"VERIFIED {res['platform'].upper()}"
+            if res.get("is_mix"):
+                badge_txt = "VERIFIED YOUTUBE (MIX DETECTED)"
+            elif res.get("has_both"):
+                badge_txt = "VERIFIED YOUTUBE (VIDEO + PLAYLIST)"
+            self.badge_platform.text = badge_txt
 
-        self.lbl_inspect_title.text = res['title']
-        self.chip_items.text = f"{res['track_count']} item(s)"
-        self.chip_dur.text = res['duration_str']
-        self.chip_size.text = f"~{res['size_estimate']}"
-
-        # Setup Scope Buttons with fluid expansion animation
-        if res.get("has_both"):
-            Animation.stop_all(self.row_scope)
-            self.row_scope.disabled = False
-            Animation(height=dp(36), opacity=1.0, duration=0.25, t='out_cubic').start(self.row_scope)
-            self.btn_scope_single.set_outline(False) # Selected
-            self.btn_scope_playlist.set_outline(True)
-        else:
-            Animation.stop_all(self.row_scope)
-            self.row_scope.disabled = True
-            Animation(height=0, opacity=0.0, duration=0.20, t='out_quad').start(self.row_scope)
-
-    def on_inspect_error(self, err):
-        self.btn_inspect.set_text("INSPECT")
-        self.badge_platform.text = "INSPECTION FAILED"
-        self.lbl_inspect_title.text = err[:80]
-        Animation.stop_all(self.row_scope)
-        self.row_scope.disabled = True
-        Animation(height=0, opacity=0.0, duration=0.20, t='out_quad').start(self.row_scope)
-
-    def switch_scope(self, scope):
-        if not self.active_analysis or not self.active_analysis.get("has_both"):
-            return
-        url = self.active_analysis.get("original_url") or self.input_url.text.strip()
-        
-        if scope == "single":
-            self.active_analysis["active_scope"] = "single"
-            self.btn_scope_single.set_outline(False)
-            self.btn_scope_playlist.set_outline(True)
-            if self.single_cache:
-                self.lbl_inspect_title.text = self.single_cache["title"]
-                self.chip_items.text = f"{self.single_cache['track_count']} item(s)"
-                self.chip_dur.text = self.single_cache["duration_str"]
-                self.chip_size.text = f"~{self.single_cache['size_estimate']}"
-        else:
-            self.active_analysis["active_scope"] = "playlist"
-            self.btn_scope_single.set_outline(True)
-            self.btn_scope_playlist.set_outline(False)
-            if self.playlist_cache:
-                self.lbl_inspect_title.text = self.playlist_cache["title"]
-                self.chip_items.text = f"{self.playlist_cache['track_count']} item(s)"
-                self.chip_dur.text = self.playlist_cache["duration_str"]
-                self.chip_size.text = f"~{self.playlist_cache['size_estimate']}"
-            else:
-                self.lbl_inspect_title.text = "Fetching full playlist details..."
-                def worker():
-                    try:
-                        p_res = engine.inspect_url(url, scope="playlist")
-                        self.playlist_cache = p_res
-                        Clock.schedule_once(lambda dt: self.on_playlist_loaded(p_res), 0)
-                    except Exception as e:
-                        pass
-                threading.Thread(target=worker, daemon=True).start()
-
-    def on_playlist_loaded(self, res):
-        if self.active_analysis and self.active_analysis.get("active_scope") == "playlist":
             self.lbl_inspect_title.text = res['title']
             self.chip_items.text = f"{res['track_count']} item(s)"
             self.chip_dur.text = res['duration_str']
             self.chip_size.text = f"~{res['size_estimate']}"
 
+            # Setup Scope Buttons with fluid expansion animation
+            if res.get("has_both"):
+                Animation.stop_all(self.row_scope)
+                self.row_scope.disabled = False
+                Animation(height=dp(36), opacity=1.0, duration=0.25, t='out_cubic').start(self.row_scope)
+                self.btn_scope_single.set_outline(False) # Selected
+                self.btn_scope_playlist.set_outline(True)
+            else:
+                Animation.stop_all(self.row_scope)
+                self.row_scope.disabled = True
+                Animation(height=0, opacity=0.0, duration=0.20, t='out_quad').start(self.row_scope)
+        except Exception:
+            pass
+
+    def on_inspect_error(self, err):
+        try:
+            self.btn_inspect.set_text("INSPECT")
+            self.badge_platform.text = "INSPECTION FAILED"
+            self.lbl_inspect_title.text = err[:80]
+            Animation.stop_all(self.row_scope)
+            self.row_scope.disabled = True
+            Animation(height=0, opacity=0.0, duration=0.20, t='out_quad').start(self.row_scope)
+        except Exception:
+            pass
+
+    def switch_scope(self, scope):
+        try:
+            if not self.active_analysis or not self.active_analysis.get("has_both"):
+                return
+            url = self.active_analysis.get("original_url") or self.input_url.text.strip()
+            
+            if scope == "single":
+                self.active_analysis["active_scope"] = "single"
+                self.btn_scope_single.set_outline(False)
+                self.btn_scope_playlist.set_outline(True)
+                if self.single_cache:
+                    self.lbl_inspect_title.text = self.single_cache["title"]
+                    self.chip_items.text = f"{self.single_cache['track_count']} item(s)"
+                    self.chip_dur.text = self.single_cache["duration_str"]
+                    self.chip_size.text = f"~{self.single_cache['size_estimate']}"
+            else:
+                self.active_analysis["active_scope"] = "playlist"
+                self.btn_scope_single.set_outline(True)
+                self.btn_scope_playlist.set_outline(False)
+                if self.playlist_cache:
+                    self.lbl_inspect_title.text = self.playlist_cache["title"]
+                    self.chip_items.text = f"{self.playlist_cache['track_count']} item(s)"
+                    self.chip_dur.text = self.playlist_cache["duration_str"]
+                    self.chip_size.text = f"~{self.playlist_cache['size_estimate']}"
+                else:
+                    self.lbl_inspect_title.text = "Fetching full playlist details..."
+                    def worker():
+                        try:
+                            p_res = engine.inspect_url(url, scope="playlist")
+                            self.playlist_cache = p_res
+                            Clock.schedule_once(lambda dt: self.on_playlist_loaded(p_res), 0)
+                        except Exception:
+                            pass
+                    threading.Thread(target=worker, daemon=True).start()
+        except Exception:
+            pass
+
+    def on_playlist_loaded(self, res):
+        try:
+            if self.active_analysis and self.active_analysis.get("active_scope") == "playlist":
+                self.lbl_inspect_title.text = res['title']
+                self.chip_items.text = f"{res['track_count']} item(s)"
+                self.chip_dur.text = res['duration_str']
+                self.chip_size.text = f"~{res['size_estimate']}"
+        except Exception:
+            pass
+
+
     def action_start_download(self, *args):
         try:
+            if getattr(self, 'is_downloading', False):
+                return
+
             url = self.input_url.text.strip()
             if not url:
                 self.lbl_progress_status.text = "Please paste a link first."
@@ -711,7 +764,7 @@ class HomeScreen(Screen):
             # Smart target URL resolution: Single video vs Playlist
             parsed = engine.parse_url_structure(url)
             target_download_url = url
-            if self.active_analysis and self.active_analysis.get("has_both"):
+            if self.active_analysis and isinstance(self.active_analysis, dict) and self.active_analysis.get("has_both"):
                 if self.active_analysis.get("active_scope") == "single":
                     target_download_url = self.active_analysis.get("clean_video_url") or url
             elif parsed.get("is_mix") and parsed.get("clean_video_url"):
@@ -732,7 +785,7 @@ class HomeScreen(Screen):
                     is_video = self.selected_format.startswith("video_")
                     bitrate = "320" if self.selected_format == "mp3_320" else ("192" if self.selected_format == "mp3_192" else "128")
 
-                    title = self.active_analysis['title'] if self.active_analysis else f"{platform} Clip"
+                    title = self.active_analysis.get('title') if (self.active_analysis and isinstance(self.active_analysis, dict)) else f"{platform} Clip"
                     cleaned = engine.clean_filename(title, 1)
                     ext_target = "mp4" if is_video else ("m4a" if self.selected_format == "m4a" else "mp3")
 
@@ -758,12 +811,15 @@ class HomeScreen(Screen):
 
                     full_path = os.path.join(dest_dir, f"{filename_base}.{ext_target}")
 
-                    Clock.schedule_once(lambda dt: self.app_ref.manager_screen.add_item(filename_base, "⏳ Downloading...", full_path, self.selected_format), 0)
+                    try:
+                        Clock.schedule_once(lambda dt, n=filename_base, p=full_path, f=self.selected_format: self.app_ref.manager_screen.add_item(n, "⏳ Downloading...", p, f), 0)
+                    except Exception:
+                        pass
 
                     def progress_hook(d):
+                        if self.stop_event.is_set():
+                            raise Exception("Stopped by user")
                         try:
-                            if self.stop_event.is_set():
-                                raise Exception("Stopped by user")
                             if d.get('status') == 'downloading':
                                 total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
                                 downloaded = d.get('downloaded_bytes') or 0
@@ -778,43 +834,37 @@ class HomeScreen(Screen):
                             pass
 
                     if IS_ANDROID:
-                        # Android: native pre-muxed single stream without FFmpeg dependency
-                        if is_video:
-                            if self.selected_format == "video_720":
-                                fmt_str = 'best[height<=720][ext=mp4]/best[height<=720]/best[ext=mp4]/best'
-                            elif self.selected_format == "video_480":
-                                fmt_str = 'best[height<=480][ext=mp4]/best[height<=480]/best[ext=mp4]/best'
-                            elif self.selected_format == "video_1080":
-                                fmt_str = 'best[height<=1080][ext=mp4]/best[height<=1080]/best[ext=mp4]/best'
-                            else:
-                                fmt_str = 'best[ext=mp4]/best'
-                            opts = {
-                                'quiet': True,
-                                'no_warnings': True,
-                                'format': fmt_str,
-                                'outtmpl': os.path.join(dest_dir, f"{filename_base}.%(ext)s"),
-                                'overwrites': True,
-                                'progress_hooks': [progress_hook],
-                                'nocheckcertificate': True,
-                                'http_headers': {
-                                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
-                                }
-                            }
+                        # Android: native pre-muxed single stream with robust fallback
+                        if self.selected_format == "video_720":
+                            fmt_str = 'best[height<=720][ext=mp4]/best[height<=720]/best[ext=mp4]/best'
+                        elif self.selected_format == "video_480":
+                            fmt_str = 'best[height<=480][ext=mp4]/best[height<=480]/best[ext=mp4]/best'
+                        elif self.selected_format == "video_1080":
+                            fmt_str = 'best[height<=1080][ext=mp4]/best[height<=1080]/best[ext=mp4]/best'
+                        elif is_video:
+                            fmt_str = 'best[ext=mp4]/best'
                         else:
-                            opts = {
-                                'quiet': True,
-                                'no_warnings': True,
-                                'format': 'bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best',
-                                'outtmpl': os.path.join(dest_dir, f"{filename_base}.%(ext)s"),
-                                'overwrites': True,
-                                'progress_hooks': [progress_hook],
-                                'nocheckcertificate': True,
-                                'http_headers': {
-                                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+                            fmt_str = 'bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best'
+
+                        opts = {
+                            'quiet': True,
+                            'no_warnings': True,
+                            'nocheckcertificate': True,
+                            'extractor_args': {
+                                'youtube': {
+                                    'player_client': ['android', 'ios', 'web']
                                 }
+                            },
+                            'format': fmt_str,
+                            'outtmpl': os.path.join(dest_dir, f"{filename_base}.%(ext)s"),
+                            'overwrites': True,
+                            'progress_hooks': [progress_hook],
+                            'http_headers': {
+                                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
                             }
+                        }
                     else:
-                        # Desktop: use FFmpeg muxing & conversion
+                        # Desktop simulator: use progressive or muxing
                         if is_video:
                             if self.selected_format == "video_720":
                                 fmt_str = 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=720]+bestaudio/best[height<=720]/best'
@@ -827,6 +877,12 @@ class HomeScreen(Screen):
                             opts = {
                                 'quiet': True,
                                 'no_warnings': True,
+                                'nocheckcertificate': True,
+                                'extractor_args': {
+                                    'youtube': {
+                                        'player_client': ['android', 'ios', 'web']
+                                    }
+                                },
                                 'format': fmt_str,
                                 'merge_output_format': 'mp4',
                                 'outtmpl': os.path.join(dest_dir, f"{filename_base}.%(ext)s"),
@@ -841,6 +897,12 @@ class HomeScreen(Screen):
                             opts = {
                                 'quiet': True,
                                 'no_warnings': True,
+                                'nocheckcertificate': True,
+                                'extractor_args': {
+                                    'youtube': {
+                                        'player_client': ['android', 'ios', 'web']
+                                    }
+                                },
                                 'format': 'bestaudio/best',
                                 'outtmpl': os.path.join(dest_dir, f"{filename_base}.%(ext)s"),
                                 'overwrites': True,
@@ -853,10 +915,18 @@ class HomeScreen(Screen):
 
                     import yt_dlp
                     with yt_dlp.YoutubeDL(opts) as ydl:
-                        ydl.download([target_download_url])
-                    Clock.schedule_once(lambda dt: self.on_download_complete(filename_base, full_path), 0)
+                        info = ydl.extract_info(target_download_url, download=True)
+                        actual_path = ydl.prepare_filename(info) if info else ""
+                        if not actual_path or not os.path.exists(actual_path):
+                            for f in os.listdir(dest_dir):
+                                if f.startswith(filename_base):
+                                    actual_path = os.path.join(dest_dir, f)
+                                    break
+                        real_path = actual_path if (actual_path and os.path.exists(actual_path)) else full_path
+
+                    Clock.schedule_once(lambda dt, n=filename_base, p=real_path: self.on_download_complete(n, p), 0)
                 except Exception as e:
-                    Clock.schedule_once(lambda dt, err=str(e): self.on_download_failed(filename_base, err), 0)
+                    Clock.schedule_once(lambda dt, n=filename_base, err=str(e): self.on_download_failed(n, err), 0)
 
             threading.Thread(target=worker, daemon=True).start()
         except Exception as e:
@@ -865,37 +935,61 @@ class HomeScreen(Screen):
             self.lbl_progress_status.text = f"Init error: {str(e)[:45]}"
 
     def update_progress_ui(self, pct, speed, eta):
-        Animation.stop_all(self.bar_progress)
-        Animation(value=pct, duration=0.15, t='out_quad').start(self.bar_progress)
-        self.lbl_pct.text = f"{int(pct)}%"
-        if speed:
-            self.lbl_speed.text = f"SPEED: {speed}"
-        if eta:
-            self.lbl_eta.text = f"ETA: {eta}"
+        try:
+            Animation.stop_all(self.bar_progress)
+            Animation(value=pct, duration=0.15, t='out_quad').start(self.bar_progress)
+            self.lbl_pct.text = f"{int(pct)}%"
+            if speed:
+                self.lbl_speed.text = f"SPEED: {speed}"
+            if eta:
+                self.lbl_eta.text = f"ETA: {eta}"
+        except Exception:
+            pass
 
     def on_download_complete(self, name, full_path):
-        self.is_downloading = False
-        self.btn_download.set_text("START DOWNLOAD")
-        self.bar_progress.value = 100
-        self.lbl_pct.text = "100%"
-        self.lbl_progress_status.text = f"Saved: {name[:35]}"
-        self.lbl_speed.text = "SPEED: --"
-        self.lbl_eta.text = "ETA: --"
-        self.app_ref.manager_screen.mark_completed(name, full_path)
-        if IS_ANDROID:
+        try:
+            self.is_downloading = False
+            self.btn_download.set_text("START DOWNLOAD")
+            self.bar_progress.value = 100
+            self.lbl_pct.text = "100%"
+            self.lbl_progress_status.text = f"Saved: {name[:35]}"
+            self.lbl_speed.text = "SPEED: --"
+            self.lbl_eta.text = "ETA: --"
             try:
-                MediaScannerConnection = autoclass('android.media.MediaScannerConnection')
-                PythonActivity = autoclass('org.kivy.android.PythonActivity')
-                context = PythonActivity.mActivity
-                MediaScannerConnection.scanFile(context, [full_path], None, None)
+                self.app_ref.manager_screen.mark_completed(name, full_path)
             except Exception:
                 pass
+            if IS_ANDROID and full_path and os.path.exists(full_path):
+                try:
+                    MediaScannerConnection = autoclass('android.media.MediaScannerConnection')
+                    PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                    context = PythonActivity.mActivity
+                    MediaScannerConnection.scanFile(context, [full_path], None, None)
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     def on_download_failed(self, name, err):
-        self.is_downloading = False
-        self.btn_download.set_text("START DOWNLOAD")
-        self.lbl_progress_status.text = f"Error: {err[:50]}"
-        self.app_ref.manager_screen.mark_failed(name)
+        try:
+            self.is_downloading = False
+            self.btn_download.set_text("START DOWNLOAD")
+            clean_err = str(err)
+            if "Requested format is not available" in clean_err:
+                clean_err = "Format unavailable on host"
+            elif "HTTP Error 403" in clean_err:
+                clean_err = "Access forbidden (403)"
+            elif "Video unavailable" in clean_err:
+                clean_err = "Media unavailable"
+            elif "Private video" in clean_err:
+                clean_err = "Media is private"
+            self.lbl_progress_status.text = f"Error: {clean_err[:40]}"
+            try:
+                self.app_ref.manager_screen.mark_failed(name)
+            except Exception:
+                pass
+        except Exception:
+            pass
 # ==========================================================
 # SCREEN 2: DOWNLOAD MANAGER
 # ==========================================================
@@ -947,95 +1041,134 @@ class ManagerScreen(Screen):
         self.add_widget(root)
 
     def add_item(self, name, status, path, fmt):
-        if self.lbl_empty in self.list_layout.children:
-            self.list_layout.remove_widget(self.lbl_empty)
+        try:
+            if self.lbl_empty in self.list_layout.children:
+                self.list_layout.remove_widget(self.lbl_empty)
 
-        card = CardBox(orientation="vertical", padding=dp(10), spacing=dp(6), size_hint_y=None, height=dp(88))
-        
-        row_top = BoxLayout(orientation="horizontal", size_hint_y=None, height=dp(24))
-        lbl_title = Label(
-            text=name[:40],
-            font_name=FONT_FAMILY,
-            font_size="13sp",
-            bold=True,
-            color=COLOR_TEXT_WHITE,
-            halign="left"
-        )
-        lbl_title.bind(size=lbl_title.setter('text_size'))
-        
-        lbl_status = Label(
-            text=status,
-            font_name=FONT_FAMILY,
-            font_size="11sp",
-            bold=True,
-            color=COLOR_GOLD,
-            size_hint_x=0.35,
-            halign="right"
-        )
-        lbl_status.bind(size=lbl_status.setter('text_size'))
-        row_top.add_widget(lbl_title)
-        row_top.add_widget(lbl_status)
-        card.add_widget(row_top)
+            card = CardBox(orientation="vertical", padding=dp(10), spacing=dp(6), size_hint_y=None, height=dp(88))
+            
+            row_top = BoxLayout(orientation="horizontal", size_hint_y=None, height=dp(24))
+            lbl_title = Label(
+                text=name[:40],
+                font_name=FONT_FAMILY,
+                font_size="13sp",
+                bold=True,
+                color=COLOR_TEXT_WHITE,
+                halign="left"
+            )
+            lbl_title.bind(size=lbl_title.setter('text_size'))
+            
+            lbl_status = Label(
+                text=status,
+                font_name=FONT_FAMILY,
+                font_size="11sp",
+                bold=True,
+                color=COLOR_GOLD,
+                size_hint_x=0.35,
+                halign="right"
+            )
+            lbl_status.bind(size=lbl_status.setter('text_size'))
+            row_top.add_widget(lbl_title)
+            row_top.add_widget(lbl_status)
+            card.add_widget(row_top)
 
-        row_actions = BoxLayout(orientation="horizontal", spacing=dp(8), size_hint_y=None, height=dp(34))
-        btn_open = GoldButton(text="OPEN FILE", is_outline=True, height_dp=34, size_hint_x=0.5, tooltip="Opens this media file in your default player.")
-        btn_open.bind(on_release=lambda x: self.open_file(path))
-        btn_folder = GoldButton(text="FOLDER", is_outline=True, height_dp=34, size_hint_x=0.5, tooltip="Opens the folder containing this file in file manager.")
-        btn_folder.bind(on_release=lambda x: self.open_folder(path))
-        row_actions.add_widget(btn_open)
-        row_actions.add_widget(btn_folder)
-        card.add_widget(row_actions)
+            row_actions = BoxLayout(orientation="horizontal", spacing=dp(8), size_hint_y=None, height=dp(34))
+            btn_open = GoldButton(text="OPEN FILE", is_outline=True, height_dp=34, size_hint_x=0.5, tooltip="Opens this media file in your default player.")
+            btn_open.bind(on_release=lambda x: self.open_file(self.items_data.get(name, {}).get("path", path)))
+            btn_folder = GoldButton(text="FOLDER", is_outline=True, height_dp=34, size_hint_x=0.5, tooltip="Opens the folder containing this file in file manager.")
+            btn_folder.bind(on_release=lambda x: self.open_folder(self.items_data.get(name, {}).get("path", path)))
+            row_actions.add_widget(btn_open)
+            row_actions.add_widget(btn_folder)
+            card.add_widget(row_actions)
 
-        self.items_data[name] = {"card": card, "status_lbl": lbl_status, "path": path}
-        card.opacity = 0
-        self.list_layout.add_widget(card)
-        Animation(opacity=1.0, duration=0.25, t='out_quad').start(card)
+            self.items_data[name] = {"card": card, "status_lbl": lbl_status, "path": path}
+            card.opacity = 0
+            self.list_layout.add_widget(card)
+            Animation(opacity=1.0, duration=0.25, t='out_quad').start(card)
+        except Exception:
+            pass
 
     def mark_completed(self, name, full_path):
-        if name in self.items_data:
-            self.items_data[name]["status_lbl"].text = "✓ Saved"
-            self.items_data[name]["status_lbl"].color = COLOR_GREEN
-            self.items_data[name]["path"] = full_path
+        try:
+            if name in self.items_data:
+                self.items_data[name]["status_lbl"].text = "✓ Saved"
+                self.items_data[name]["status_lbl"].color = COLOR_GREEN
+                self.items_data[name]["path"] = full_path
+        except Exception:
+            pass
 
     def mark_failed(self, name):
-        if name in self.items_data:
-            self.items_data[name]["status_lbl"].text = "✕ Failed"
-            self.items_data[name]["status_lbl"].color = [0.8, 0.4, 0.4, 1.0]
+        try:
+            if name in self.items_data:
+                self.items_data[name]["status_lbl"].text = "✕ Failed"
+                self.items_data[name]["status_lbl"].color = [0.8, 0.4, 0.4, 1.0]
+        except Exception:
+            pass
 
     def open_file(self, path):
-        if not path or not os.path.exists(path):
-            return
-        if IS_ANDROID:
-            try:
-                PythonActivity = autoclass('org.kivy.android.PythonActivity')
-                currentActivity = PythonActivity.mActivity
-                Intent = autoclass('android.content.Intent')
-                Uri = autoclass('android.net.Uri')
-                File = autoclass('java.io.File')
-                file_obj = File(path)
-                intent = Intent(Intent.ACTION_VIEW)
-                intent.setDataAndType(Uri.fromFile(file_obj), "video/*" if path.endswith('.mp4') else "audio/*")
-                currentActivity.startActivity(intent)
-            except Exception:
-                pass
-        else:
-            if sys.platform == "win32":
-                os.startfile(path)
-            elif sys.platform == "darwin":
-                subprocess.run(["open", path])
+        try:
+            if not path or not os.path.exists(path):
+                return
+            if IS_ANDROID:
+                try:
+                    StrictMode = autoclass('android.os.StrictMode')
+                    builder = autoclass('android.os.StrictMode$VmPolicy$Builder')()
+                    StrictMode.setVmPolicy(builder.build())
+
+                    PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                    currentActivity = PythonActivity.mActivity
+                    Intent = autoclass('android.content.Intent')
+                    Uri = autoclass('android.net.Uri')
+                    File = autoclass('java.io.File')
+                    file_obj = File(path)
+                    intent = Intent(Intent.ACTION_VIEW)
+                    mime = "video/*" if path.lower().endswith(('.mp4', '.mkv', '.webm')) else ("audio/*" if path.lower().endswith(('.mp3', '.m4a', '.wav', '.opus', '.aac')) else "*/*")
+                    intent.setDataAndType(Uri.fromFile(file_obj), mime)
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    currentActivity.startActivity(intent)
+                except Exception:
+                    pass
             else:
-                subprocess.run(["xdg-open", path])
+                if sys.platform == "win32":
+                    os.startfile(path)
+                elif sys.platform == "darwin":
+                    subprocess.run(["open", path])
+                else:
+                    subprocess.run(["xdg-open", path])
+        except Exception:
+            pass
 
     def open_folder(self, path):
-        folder = os.path.dirname(path) if path else engine.get_default_download_dir()
-        if not os.path.exists(folder):
-            return
-        if sys.platform == "win32":
-            os.startfile(folder)
-        elif sys.platform == "darwin":
-            subprocess.run(["open", folder])
-        else:
-            subprocess.run(["xdg-open", folder])
+        try:
+            folder = os.path.dirname(path) if path else engine.get_default_download_dir()
+            if not os.path.exists(folder):
+                folder = engine.get_default_download_dir()
+            if IS_ANDROID:
+                try:
+                    StrictMode = autoclass('android.os.StrictMode')
+                    builder = autoclass('android.os.StrictMode$VmPolicy$Builder')()
+                    StrictMode.setVmPolicy(builder.build())
+
+                    PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                    currentActivity = PythonActivity.mActivity
+                    Intent = autoclass('android.content.Intent')
+                    Uri = autoclass('android.net.Uri')
+                    intent = Intent(Intent.ACTION_VIEW)
+                    intent.setDataAndType(Uri.parse(f"file://{folder}"), "*/*")
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    currentActivity.startActivity(intent)
+                except Exception:
+                    pass
+            else:
+                if sys.platform == "win32":
+                    os.startfile(folder)
+                elif sys.platform == "darwin":
+                    subprocess.run(["open", folder])
+                else:
+                    subprocess.run(["xdg-open", folder])
+        except Exception:
+            pass
 
     def clear_all(self, *args):
         self.list_layout.clear_widgets()
