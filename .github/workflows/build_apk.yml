@@ -98,14 +98,15 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: github.ref == 'refs/heads/main'
         with:
-          tag_name: v1.0.9-mobile
-          name: Universal Downloader Android APK v1.0.9
+          tag_name: v1.0.10-mobile
+          name: Universal Downloader Android APK v1.0.10
           body: |
-            ### 📱 Universal Downloader for Android (v1.0.9)
-            - **App-Only Download Manager**: The Download Manager now exclusively displays media downloaded within the app. Discovered non-app files (e.g., Reddit videos, trashed files) are filtered out completely.
-            - **Native Folder Picker (SAF)**: Tapping "SELECT PATH" in Settings launches the system file explorer (`ACTION_OPEN_DOCUMENT_TREE`) to pick any custom folder on device storage and activate it instantly.
-            - **Streamlined Settings**: Removed extra presets, duplicate preferences card, and icons for a clean two-button path controller: "SELECT PATH" and "RESTORE TO DEFAULT" (public Downloads folder).
-            - **Persistent History**: Download history is maintained in app storage and synchronizes seamlessly across app restarts.
+            ### 📱 Universal Downloader for Android (v1.0.10) - High-Refresh Fluid UI Edition
+            - **Native 90Hz/120Hz/144Hz Unlocked Rendering**: Configured GPU rendering engine (`maxfps: 0`) to dynamically match high-refresh display hardware on modern Android devices for buttery smooth 120 FPS animations.
+            - **Zero-Latency Touch & Scroll**: Re-tuned scroll deadzones (`scroll_distance: dp(6)`, `scroll_timeout: 180ms`) across all tabs for instant, responsive flick gestures without sluggish start lag.
+            - **Intelligent Gesture Isolation**: Vertical scrolling in lists now automatically locks horizontal tab swiping so scrolling is 100% uninterrupted without accidental screen switching.
+            - **Hardware-Accelerated 2D Vertex Cache**: Replaced CPU-heavy bezier arc re-tessellation with native hardware rounded rectangles, eliminating micro-stutters during high-speed scrolling.
+            - **Instant Tactile Feedback**: Gold buttons now register visual press feedback immediately on touch down.
             - **Verified Signature**: Signed with 2048-bit RSA key across APK Signature Schemes v1, v2, and v3 under package domain `com.universalmedia`.
           files: android_app/bin/*.apk
         env:

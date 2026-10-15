@@ -8,12 +8,16 @@ import threading
 import unicodedata
 import subprocess
 
-# Configure mobile simulation viewport if running on desktop
+# Configure mobile simulation viewport and high-performance fluid rendering
 from kivy.config import Config
 Config.set('graphics', 'width', '412')
 Config.set('graphics', 'height', '860')
 Config.set('graphics', 'resizable', '1')
+Config.set('graphics', 'maxfps', '0')
+Config.set('graphics', 'multisamples', '2')
 Config.set('input', 'mouse', 'mouse,multitouch_on_demand')
+Config.set('kivy', 'scroll_distance', '6')
+Config.set('kivy', 'scroll_timeout', '180')
 
 import kivy
 # Ensure Kivy's ProcessingStream never breaks yt-dlp logger and error reporting
@@ -159,28 +163,32 @@ class VectorIcon(Widget):
 
 # Reusable Styled Components
 class CardBox(BoxLayout):
-    """Luxury card container with rounded corners and subtle border."""
+    """Luxury card container with rounded corners and subtle border, optimized for 120 FPS scrolling."""
     def __init__(self, bg_color=COLOR_SURFACE, border_color=COLOR_BORDER, radius=12, **kwargs):
         super().__init__(**kwargs)
         self.bg_color = bg_color
         self.border_color = border_color
         self.radius = dp(radius)
         with self.canvas.before:
-            self.col_bg = Color(*self.bg_color)
-            self.rect_bg = RoundedRectangle(pos=self.pos, size=self.size, radius=[self.radius])
             self.col_border = Color(*self.border_color)
-            self.rect_border = Line(rounded_rectangle=(self.pos[0], self.pos[1], self.size[0], self.size[1], self.radius), width=dp(1.1))
+            self.rect_border = RoundedRectangle(pos=self.pos, size=self.size, radius=[self.radius])
+            self.col_bg = Color(*self.bg_color)
+            self.rect_bg = RoundedRectangle(
+                pos=(self.pos[0] + dp(1), self.pos[1] + dp(1)),
+                size=(max(0, self.size[0] - dp(2)), max(0, self.size[1] - dp(2))),
+                radius=[max(0, self.radius - dp(1))]
+            )
         self.bind(pos=self._update_canvas, size=self._update_canvas)
 
     def _update_canvas(self, *args):
-        self.rect_bg.pos = self.pos
-        self.rect_bg.size = self.size
-        self.rect_border.rounded_rectangle = (self.pos[0], self.pos[1], self.size[0], self.size[1], self.radius)
-
+        self.rect_border.pos = self.pos
+        self.rect_border.size = self.size
+        self.rect_bg.pos = (self.pos[0] + dp(1), self.pos[1] + dp(1))
+        self.rect_bg.size = (max(0, self.size[0] - dp(2)), max(0, self.size[1] - dp(2)))
 
 
 class GoldButton(ButtonBehavior, BoxLayout):
-    """Modern gold touch button with tactile feedback."""
+    """Modern gold touch button with zero-latency tactile feedback."""
     def __init__(self, text="", is_outline=False, height_dp=48, tooltip="", **kwargs):
         kwargs['size_hint_y'] = None
         kwargs['height'] = dp(height_dp)
@@ -190,15 +198,20 @@ class GoldButton(ButtonBehavior, BoxLayout):
         self.orientation = "horizontal"
         self.padding = [dp(8), dp(4)]
 
-        self.normal_bg = [0, 0, 0, 0] if is_outline else COLOR_GOLD
-        self.pressed_bg = [0.83, 0.69, 0.22, 0.2] if is_outline else COLOR_GOLD_LIGHT
+        self.normal_bg = [0.12, 0.12, 0.15, 1.0] if is_outline else COLOR_GOLD
+        self.pressed_bg = [0.83, 0.69, 0.22, 0.25] if is_outline else COLOR_GOLD_LIGHT
         self.border_col = COLOR_GOLD if is_outline else [0, 0, 0, 0]
 
         with self.canvas.before:
-            self.canvas_bg = Color(*self.normal_bg)
-            self.rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(10)])
             self.canvas_border = Color(*self.border_col)
-            self.line_border = Line(rounded_rectangle=(self.pos[0], self.pos[1], self.size[0], self.size[1], dp(10)), width=dp(1.2))
+            self.rect_border = RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(10)])
+            self.canvas_bg = Color(*self.normal_bg)
+            pad = dp(1.2) if is_outline else 0
+            self.rect_bg = RoundedRectangle(
+                pos=(self.pos[0] + pad, self.pos[1] + pad),
+                size=(max(0, self.size[0] - pad * 2), max(0, self.size[1] - pad * 2)),
+                radius=[dp(10)]
+            )
         self.bind(pos=self._update_canvas, size=self._update_canvas)
 
         self.lbl = Label(
@@ -214,27 +227,27 @@ class GoldButton(ButtonBehavior, BoxLayout):
         self.add_widget(self.lbl)
 
     def _update_canvas(self, *args):
-        self.rect.pos = self.pos
-        self.rect.size = self.size
-        self.line_border.rounded_rectangle = (self.pos[0], self.pos[1], self.size[0], self.size[1], dp(10))
+        pad = dp(1.2) if self.is_outline else 0
+        self.rect_border.pos = self.pos
+        self.rect_border.size = self.size
+        self.rect_bg.pos = (self.pos[0] + pad, self.pos[1] + pad)
+        self.rect_bg.size = (max(0, self.size[0] - pad * 2), max(0, self.size[1] - pad * 2))
 
     def on_press(self):
-        Animation.stop_all(self.canvas_bg)
-        Animation(rgba=self.pressed_bg, duration=0.06).start(self.canvas_bg)
+        self.canvas_bg.rgba = self.pressed_bg
 
     def on_release(self):
         Animation.stop_all(self.canvas_bg)
-        Animation(rgba=self.normal_bg, duration=0.18, t='out_quad').start(self.canvas_bg)
+        Animation(rgba=self.normal_bg, duration=0.15, t='out_quad').start(self.canvas_bg)
 
     def set_outline(self, is_outline):
         self.is_outline = is_outline
-        self.normal_bg = [0, 0, 0, 0] if is_outline else COLOR_GOLD
+        self.normal_bg = [0.12, 0.12, 0.15, 1.0] if is_outline else COLOR_GOLD
         self.border_col = COLOR_GOLD if is_outline else [0, 0, 0, 0]
-        Animation.stop_all(self.canvas_bg)
-        Animation.stop_all(self.canvas_border)
-        Animation(rgba=self.normal_bg, duration=0.15).start(self.canvas_bg)
-        Animation(rgba=self.border_col, duration=0.15).start(self.canvas_border)
+        self.canvas_border.rgba = self.border_col
+        self.canvas_bg.rgba = self.normal_bg
         self.lbl.color = COLOR_GOLD if is_outline else [0.08, 0.08, 0.09, 1.0]
+        self._update_canvas()
 
     def set_text(self, text):
         self.text = text
@@ -280,14 +293,11 @@ class NavButton(ButtonBehavior, BoxLayout):
         self.is_active = active
         self.v_icon.set_active(active)
         Animation.stop_all(self.pill_col)
-        Animation.stop_all(self.v_icon)
         if active:
-            Animation(rgba=[0.83, 0.69, 0.22, 0.18], duration=0.22, t='out_quad').start(self.pill_col)
+            Animation(rgba=[0.83, 0.69, 0.22, 0.18], duration=0.18, t='out_quad').start(self.pill_col)
             self.lbl_text.color = COLOR_GOLD
-            anim_bounce = Animation(size=(dp(23), dp(23)), duration=0.09, t='out_quad') + Animation(size=(dp(20), dp(20)), duration=0.12, t='in_out_quad')
-            anim_bounce.start(self.v_icon)
         else:
-            Animation(rgba=[0, 0, 0, 0], duration=0.16).start(self.pill_col)
+            Animation(rgba=[0, 0, 0, 0], duration=0.14).start(self.pill_col)
             self.lbl_text.color = COLOR_TEXT_MUTED
 
     def on_release(self):
@@ -347,7 +357,14 @@ class HomeScreen(Screen):
         root.add_widget(hdr)
 
         # Scrollable Content
-        scroll = ScrollView(size_hint=(1, 1), do_scroll_x=False)
+        scroll = ScrollView(
+            size_hint=(1, 1),
+            do_scroll_x=False,
+            scroll_distance=dp(6),
+            scroll_timeout=180,
+            smooth_scroll_end=16,
+            bar_width=0
+        )
         content = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(12))
         content.bind(minimum_height=content.setter('height'))
 
@@ -597,6 +614,10 @@ class HomeScreen(Screen):
             btn.set_outline(not is_active)
 
     def on_url_text_change(self, instance, text):
+        Clock.unschedule(self._debounced_url_check)
+        Clock.schedule_once(lambda dt: self._debounced_url_check(text), 0.15)
+
+    def _debounced_url_check(self, text):
         t = text.strip()
         if t.startswith(('http://', 'https://')):
             parsed = engine.parse_url_structure(t)
@@ -949,8 +970,7 @@ class HomeScreen(Screen):
 
     def update_progress_ui(self, pct, speed, eta):
         try:
-            Animation.stop_all(self.bar_progress)
-            Animation(value=pct, duration=0.15, t='out_quad').start(self.bar_progress)
+            self.bar_progress.value = pct
             self.lbl_pct.text = f"{int(pct)}%"
             if speed:
                 self.lbl_speed.text = f"SPEED: {speed}"
@@ -1031,7 +1051,14 @@ class ManagerScreen(Screen):
         hdr.add_widget(lbl_brand)
         root.add_widget(hdr)
 
-        scroll = ScrollView(size_hint=(1, 1), do_scroll_x=False)
+        scroll = ScrollView(
+            size_hint=(1, 1),
+            do_scroll_x=False,
+            scroll_distance=dp(6),
+            scroll_timeout=180,
+            smooth_scroll_end=16,
+            bar_width=0
+        )
         self.list_layout = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(10))
         self.list_layout.bind(minimum_height=self.list_layout.setter('height'))
 
@@ -1079,12 +1106,12 @@ class ManagerScreen(Screen):
                 path = it.get("path", "")
                 fmt = it.get("format", "MP4")
                 if name and name not in self.items_data:
-                    self.add_item(name, "✓ Saved", path, fmt)
+                    self.add_item(name, "✓ Saved", path, fmt, animate=False)
                     self.mark_completed(name, path)
         except Exception:
             pass
 
-    def add_item(self, name, status, path, fmt):
+    def add_item(self, name, status, path, fmt, animate=True):
         try:
             if self.lbl_empty in self.list_layout.children:
                 self.list_layout.remove_widget(self.lbl_empty)
@@ -1126,9 +1153,13 @@ class ManagerScreen(Screen):
             card.add_widget(row_actions)
 
             self.items_data[name] = {"card": card, "status_lbl": lbl_status, "path": path}
-            card.opacity = 0
-            self.list_layout.add_widget(card)
-            Animation(opacity=1.0, duration=0.25, t='out_quad').start(card)
+            if animate:
+                card.opacity = 0
+                self.list_layout.add_widget(card)
+                Animation(opacity=1.0, duration=0.20, t='out_quad').start(card)
+            else:
+                card.opacity = 1.0
+                self.list_layout.add_widget(card)
         except Exception:
             pass
 
@@ -1291,7 +1322,14 @@ class SettingsScreen(Screen):
         hdr.add_widget(lbl_brand)
         root.add_widget(hdr)
 
-        scroll = ScrollView(size_hint=(1, 1), do_scroll_x=False)
+        scroll = ScrollView(
+            size_hint=(1, 1),
+            do_scroll_x=False,
+            scroll_distance=dp(6),
+            scroll_timeout=180,
+            smooth_scroll_end=16,
+            bar_width=0
+        )
         content = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(12))
         content.bind(minimum_height=content.setter('height'))
 
@@ -1574,19 +1612,25 @@ class UniversalDownloaderMobileApp(App):
 
     def _on_window_touch_move(self, win, touch):
         origin = touch.ud.get('tab_swipe_origin')
-        if not origin:
+        if not origin or touch.ud.get('tab_swipe_locked', False):
             return False
 
         dx = touch.x - origin[0]
         dy = touch.y - origin[1]
 
-        # When horizontal gesture begins, ungrab buttons so they don't fire accidental taps
-        if abs(dx) > dp(25) and abs(dx) > 1.3 * abs(dy):
+        # If vertical scroll detected, lock tab swipe immediately so scrolling is 100% uninterrupted
+        if abs(dy) > dp(8) and abs(dy) > 1.2 * abs(dx):
+            touch.ud['tab_swipe_locked'] = True
+            return False
+
+        # When genuine horizontal swipe begins, ungrab buttons only (never touch the ScrollView!)
+        if abs(dx) > dp(28) and abs(dx) > 1.6 * abs(dy):
             for item in list(touch.grab_list):
                 try:
-                    touch.ungrab(item)
-                    if hasattr(item, 'state'):
-                        item.state = 'normal'
+                    if isinstance(item, ButtonBehavior) or hasattr(item, 'on_press'):
+                        touch.ungrab(item)
+                        if hasattr(item, 'state'):
+                            item.state = 'normal'
                 except Exception:
                     pass
         return False
@@ -1600,26 +1644,26 @@ class UniversalDownloaderMobileApp(App):
         if hasattr(self.sm, 'transition') and hasattr(self.sm.transition, 'is_active') and self.sm.transition.is_active:
             return False
 
-        # Enforce minimum cooldown between consecutive tab swipes
+        # Snappy cooldown between consecutive tab swipes
         now = time.time()
-        if now - getattr(self, '_last_swipe_time', 0) < 0.35:
+        if now - getattr(self, '_last_swipe_time', 0) < 0.28:
             return False
 
         dx = touch.x - origin[0]
         dy = touch.y - origin[1]
-        threshold = dp(35)
+        threshold = dp(40)
 
-        # Require predominantly horizontal swipe
-        if abs(dx) >= threshold and abs(dx) > 1.25 * abs(dy):
+        # Require deliberate horizontal swipe
+        if abs(dx) >= threshold and abs(dx) > 1.5 * abs(dy):
             touch.ud['tab_swipe_locked'] = True
             self._last_swipe_time = now
 
-            # Ensure all buttons ungrabbed
             for item in list(touch.grab_list):
                 try:
-                    touch.ungrab(item)
-                    if hasattr(item, 'state'):
-                        item.state = 'normal'
+                    if isinstance(item, ButtonBehavior) or hasattr(item, 'on_press'):
+                        touch.ungrab(item)
+                        if hasattr(item, 'state'):
+                            item.state = 'normal'
                 except Exception:
                     pass
 
@@ -1657,11 +1701,15 @@ class UniversalDownloaderMobileApp(App):
 
         if cfg_style == "fade" and direction is None:
             if not isinstance(self.sm.transition, FadeTransition):
-                self.sm.transition = FadeTransition(duration=0.20)
+                self.sm.transition = FadeTransition(duration=0.18)
+            else:
+                self.sm.transition.duration = 0.18
         else:
             # Default or gesture swipe: Smooth Direction-Aware Slide (left if going forward, right if going back)
             if not isinstance(self.sm.transition, SlideTransition):
-                self.sm.transition = SlideTransition(duration=0.25)
+                self.sm.transition = SlideTransition(duration=0.22)
+            else:
+                self.sm.transition.duration = 0.22
             if direction:
                 self.sm.transition.direction = direction
             else:
