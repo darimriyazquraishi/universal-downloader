@@ -55,8 +55,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: github.ref == 'refs/heads/main'
         with:
-          tag_name: v1.0.0-mobile
-          name: Universal Downloader Android APK v1.0.0
+          tag_name: v1.0.1-mobile
+          name: Universal Downloader Android APK v1.0.1
           body: |
             ### 📱 Universal Downloader for Android (v1.0.0)
             - **Design**: Dark Obsidian & Radiant Gold luxury aesthetic
