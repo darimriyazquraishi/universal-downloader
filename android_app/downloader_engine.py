@@ -53,10 +53,42 @@ try:
 except Exception:
     IS_ANDROID = False
 
+def get_public_download_dir():
+    """Retrieve public device Download directory."""
+    if IS_ANDROID:
+        try:
+            pub_download = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).getAbsolutePath()
+            if os.path.isdir(pub_download):
+                return pub_download
+        except Exception:
+            pass
+        for candidate in ["/storage/emulated/0/Download", "/sdcard/Download"]:
+            if os.path.isdir(candidate):
+                return candidate
+        return "/storage/emulated/0/Download"
+    else:
+        user_downloads = os.path.join(os.path.expanduser("~"), "Downloads")
+        if os.path.exists(user_downloads):
+            return os.path.normpath(os.path.join(user_downloads, "Media Downloads"))
+        return os.path.normpath(os.path.join(os.path.dirname(__file__), "downloads"))
+
 def get_default_download_dir():
     """Determine default storage directory for Android vs Desktop simulator."""
     if IS_ANDROID:
-        # Priority 1: App's dedicated external downloads directory (guaranteed writable without special permissions)
+        # Priority 1: Public device Download folder (visible to user, gallery, and all video players)
+        pub = get_public_download_dir()
+        try:
+            os.makedirs(pub, exist_ok=True)
+            test_file = os.path.join(pub, ".write_test")
+            with open(test_file, "w") as f:
+                f.write("1")
+            if os.path.exists(test_file):
+                os.remove(test_file)
+            return pub
+        except Exception:
+            pass
+
+        # Fallback to app external files dir only if public storage cannot be written directly
         try:
             PythonActivity = autoclass('org.kivy.android.PythonActivity')
             activity = PythonActivity.mActivity
@@ -68,19 +100,7 @@ def get_default_download_dir():
         except Exception:
             pass
 
-        # Priority 2: Public Download folder directly (already exists, avoid creating unpermitted subdirs on Android 11+)
-        try:
-            download_dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).getAbsolutePath()
-            if os.path.isdir(download_dir):
-                return download_dir
-        except Exception:
-            pass
-
-        for candidate in ["/storage/emulated/0/Download", "/sdcard/Download"]:
-            if os.path.isdir(candidate):
-                return candidate
-
-        return "/storage/emulated/0/Download"
+        return pub
     else:
         user_downloads = os.path.join(os.path.expanduser("~"), "Downloads")
         if os.path.exists(user_downloads):
@@ -90,6 +110,20 @@ def get_default_download_dir():
 def ensure_valid_download_dir(dir_path=None):
     """Ensure directory exists and is writable, returning a safe, verified path."""
     if dir_path:
+        # Automatic upgrade: if old settings had the locked Android/data path, migrate to public Downloads!
+        if IS_ANDROID and "Android/data" in dir_path:
+            pub = get_public_download_dir()
+            try:
+                os.makedirs(pub, exist_ok=True)
+                test_file = os.path.join(pub, ".write_test")
+                with open(test_file, "w") as f:
+                    f.write("1")
+                if os.path.exists(test_file):
+                    os.remove(test_file)
+                return pub
+            except Exception:
+                pass
+
         # Clean any legacy unpermitted subfolder path on Android
         if IS_ANDROID and dir_path.endswith("Media Downloads"):
             parent = os.path.dirname(dir_path)
@@ -108,6 +142,50 @@ def ensure_valid_download_dir(dir_path=None):
             pass
 
     return get_default_download_dir()
+
+def get_storage_presets():
+    """Return available storage location presets for UI selection."""
+    presets = []
+    if IS_ANDROID:
+        try:
+            p_dl = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).getAbsolutePath()
+            presets.append({"id": "downloads", "title": "Downloads", "path": p_dl, "desc": "Phone Downloads (Public)"})
+        except Exception:
+            presets.append({"id": "downloads", "title": "Downloads", "path": "/storage/emulated/0/Download", "desc": "Phone Downloads (Public)"})
+
+        try:
+            p_mov = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES).getAbsolutePath()
+            presets.append({"id": "movies", "title": "Movies", "path": p_mov, "desc": "Movies Folder (Public)"})
+        except Exception:
+            presets.append({"id": "movies", "title": "Movies", "path": "/storage/emulated/0/Movies", "desc": "Movies Folder (Public)"})
+
+        try:
+            p_mus = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC).getAbsolutePath()
+            presets.append({"id": "music", "title": "Music", "path": p_mus, "desc": "Music Folder (Public)"})
+        except Exception:
+            presets.append({"id": "music", "title": "Music", "path": "/storage/emulated/0/Music", "desc": "Music Folder (Public)"})
+
+        try:
+            p_doc = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS).getAbsolutePath()
+            presets.append({"id": "documents", "title": "Documents", "path": p_doc, "desc": "Documents Folder (Public)"})
+        except Exception:
+            presets.append({"id": "documents", "title": "Documents", "path": "/storage/emulated/0/Documents", "desc": "Documents Folder (Public)"})
+    else:
+        user_downloads = os.path.join(os.path.expanduser("~"), "Downloads")
+        presets.append({"id": "downloads", "title": "Downloads", "path": os.path.normpath(os.path.join(user_downloads, "Media Downloads")), "desc": "User Downloads"})
+        user_videos = os.path.join(os.path.expanduser("~"), "Videos")
+        if os.path.exists(user_videos):
+            presets.append({"id": "movies", "title": "Videos", "path": os.path.normpath(os.path.join(user_videos, "Media Downloads")), "desc": "User Videos"})
+        user_music = os.path.join(os.path.expanduser("~"), "Music")
+        if os.path.exists(user_music):
+            presets.append({"id": "music", "title": "Music", "path": os.path.normpath(os.path.join(user_music, "Media Downloads")), "desc": "User Music"})
+        user_docs = os.path.join(os.path.expanduser("~"), "Documents")
+        if os.path.exists(user_docs):
+            presets.append({"id": "documents", "title": "Documents", "path": os.path.normpath(os.path.join(user_docs, "Media Downloads")), "desc": "User Documents"})
+
+
+    return presets
+
 
 def get_config_path():
     """Path to settings JSON file."""

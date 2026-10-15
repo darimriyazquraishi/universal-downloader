@@ -924,6 +924,19 @@ class HomeScreen(Screen):
                                     break
                         real_path = actual_path if (actual_path and os.path.exists(actual_path)) else full_path
 
+                    # On Android, if file is inside private storage, copy to public Downloads so player has full access
+                    if IS_ANDROID and "android/data" in real_path.lower() and os.path.exists(real_path):
+                        try:
+                            pub_dir = engine.get_public_download_dir()
+                            if pub_dir and os.path.isdir(pub_dir):
+                                pub_dest = os.path.join(pub_dir, os.path.basename(real_path))
+                                if not os.path.exists(pub_dest):
+                                    shutil.copy2(real_path, pub_dest)
+                                if os.path.exists(pub_dest):
+                                    real_path = pub_dest
+                        except Exception:
+                            pass
+
                     Clock.schedule_once(lambda dt, n=filename_base, p=real_path: self.on_download_complete(n, p), 0)
                 except Exception as e:
                     Clock.schedule_once(lambda dt, n=filename_base, err=str(e): self.on_download_failed(n, err), 0)
@@ -1034,11 +1047,53 @@ class ManagerScreen(Screen):
         scroll.add_widget(self.list_layout)
         root.add_widget(scroll)
 
-        btn_clear = GoldButton(text="CLEAR HISTORY", is_outline=True, height_dp=42, tooltip="Clears the download history list from display.")
+        row_mgr_acts = BoxLayout(orientation="horizontal", spacing=dp(8), size_hint_y=None, height=dp(42))
+        btn_refresh = GoldButton(text="REFRESH FILES", is_outline=False, height_dp=42, size_hint_x=0.5, tooltip="Scan storage folder for downloaded media files.")
+        btn_refresh.bind(on_release=lambda *_: self.populate_from_disk())
+        btn_clear = GoldButton(text="CLEAR LIST", is_outline=True, height_dp=42, size_hint_x=0.5, tooltip="Clears the download history list from display.")
         btn_clear.bind(on_release=self.clear_all)
-        root.add_widget(btn_clear)
+        row_mgr_acts.add_widget(btn_refresh)
+        row_mgr_acts.add_widget(btn_clear)
+        root.add_widget(row_mgr_acts)
 
         self.add_widget(root)
+        Clock.schedule_once(lambda dt: self.populate_from_disk(), 0.6)
+
+    def on_pre_enter(self, *args):
+        super().on_pre_enter(*args)
+        self.populate_from_disk()
+
+    def populate_from_disk(self):
+        try:
+            cfg = engine.load_settings()
+            dest_dir = cfg.get("download_dir", engine.get_default_download_dir())
+            dirs_to_check = [dest_dir]
+            pub_dir = engine.get_public_download_dir()
+            if pub_dir and pub_dir not in dirs_to_check and os.path.isdir(pub_dir):
+                dirs_to_check.append(pub_dir)
+            
+            found_files = []
+            for d in dirs_to_check:
+                if os.path.isdir(d):
+                    try:
+                        for f in os.listdir(d):
+                            if f.lower().endswith(('.mp4', '.mp3', '.m4a', '.webm', '.mkv', '.wav')):
+                                full_f = os.path.join(d, f)
+                                if os.path.isfile(full_f):
+                                    mtime = os.path.getmtime(full_f)
+                                    found_files.append((mtime, f, full_f))
+                    except Exception:
+                        pass
+            
+            found_files.sort(key=lambda x: x[0], reverse=True)
+            for _, fname, fpath in found_files[:30]:
+                name_base = os.path.splitext(fname)[0]
+                if name_base not in self.items_data:
+                    fmt_tag = "MP4" if fname.lower().endswith(('.mp4', '.mkv', '.webm')) else "MP3"
+                    self.add_item(name_base, "✓ Saved", fpath, fmt_tag)
+                    self.mark_completed(name_base, fpath)
+        except Exception:
+            pass
 
     def add_item(self, name, status, path, fmt):
         try:
@@ -1107,10 +1162,23 @@ class ManagerScreen(Screen):
 
     def open_file(self, path):
         try:
-            if not path or not os.path.exists(path):
+            if not path:
                 return
             if IS_ANDROID:
                 try:
+                    # If file is trapped in private Android/data, copy to public Downloads so player has full access
+                    if "android/data" in path.lower() and os.path.exists(path):
+                        pub_dir = engine.get_public_download_dir()
+                        if pub_dir and os.path.isdir(pub_dir):
+                            pub_path = os.path.join(pub_dir, os.path.basename(path))
+                            if not os.path.exists(pub_path):
+                                shutil.copy2(path, pub_path)
+                            if os.path.exists(pub_path):
+                                path = pub_path
+
+                    if not os.path.exists(path):
+                        return
+
                     StrictMode = autoclass('android.os.StrictMode')
                     builder = autoclass('android.os.StrictMode$VmPolicy$Builder')()
                     StrictMode.setVmPolicy(builder.build())
@@ -1121,15 +1189,31 @@ class ManagerScreen(Screen):
                     Uri = autoclass('android.net.Uri')
                     File = autoclass('java.io.File')
                     file_obj = File(path)
+                    
+                    is_video = path.lower().endswith(('.mp4', '.mkv', '.webm', '.avi', '.mov'))
+                    is_audio = path.lower().endswith(('.mp3', '.m4a', '.wav', '.opus', '.aac', '.flac'))
+                    mime = "video/*" if is_video else ("audio/*" if is_audio else "*/*")
+
+                    # Scan with media scanner so system recognizes it
+                    try:
+                        MediaScannerConnection = autoclass('android.media.MediaScannerConnection')
+                        MediaScannerConnection.scanFile(currentActivity, [path], None, None)
+                    except Exception:
+                        pass
+
                     intent = Intent(Intent.ACTION_VIEW)
-                    mime = "video/*" if path.lower().endswith(('.mp4', '.mkv', '.webm')) else ("audio/*" if path.lower().endswith(('.mp3', '.m4a', '.wav', '.opus', '.aac')) else "*/*")
                     intent.setDataAndType(Uri.fromFile(file_obj), mime)
                     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    currentActivity.startActivity(intent)
+                    
+                    chooser = Intent.createChooser(intent, "Play media with...")
+                    chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    currentActivity.startActivity(chooser)
                 except Exception:
                     pass
             else:
+                if not os.path.exists(path):
+                    return
                 if sys.platform == "win32":
                     os.startfile(path)
                 elif sys.platform == "darwin":
@@ -1141,23 +1225,39 @@ class ManagerScreen(Screen):
 
     def open_folder(self, path):
         try:
-            folder = os.path.dirname(path) if path else engine.get_default_download_dir()
+            folder = os.path.dirname(path) if (path and os.path.isfile(path)) else (path or engine.get_default_download_dir())
             if not os.path.exists(folder):
                 folder = engine.get_default_download_dir()
+
             if IS_ANDROID:
                 try:
-                    StrictMode = autoclass('android.os.StrictMode')
-                    builder = autoclass('android.os.StrictMode$VmPolicy$Builder')()
-                    StrictMode.setVmPolicy(builder.build())
-
                     PythonActivity = autoclass('org.kivy.android.PythonActivity')
                     currentActivity = PythonActivity.mActivity
                     Intent = autoclass('android.content.Intent')
                     Uri = autoclass('android.net.Uri')
+                    DownloadManager = autoclass('android.app.DownloadManager')
+
+                    # Priority 1: If folder is Downloads or public storage, use system DownloadManager intent
+                    if "download" in folder.lower():
+                        try:
+                            intent = Intent(DownloadManager.ACTION_VIEW_DOWNLOADS)
+                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            currentActivity.startActivity(intent)
+                            return
+                        except Exception:
+                            pass
+
+                    # Priority 2: Use file explorer intent
+                    StrictMode = autoclass('android.os.StrictMode')
+                    builder = autoclass('android.os.StrictMode$VmPolicy$Builder')()
+                    StrictMode.setVmPolicy(builder.build())
+
                     intent = Intent(Intent.ACTION_VIEW)
-                    intent.setDataAndType(Uri.parse(f"file://{folder}"), "*/*")
+                    intent.setDataAndType(Uri.parse(f"file://{folder}"), "resource/folder")
                     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    currentActivity.startActivity(intent)
+                    chooser = Intent.createChooser(intent, "Open folder with...")
+                    chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    currentActivity.startActivity(chooser)
                 except Exception:
                     pass
             else:
@@ -1209,7 +1309,7 @@ class SettingsScreen(Screen):
         card_dest = CardBox(orientation="vertical", padding=dp(12), spacing=dp(10), size_hint_y=None)
         card_dest.bind(minimum_height=card_dest.setter('height'))
         lbl_d = Label(
-            text="DOWNLOAD DESTINATION FOLDER",
+            text="DOWNLOAD DESTINATION STORAGE",
             font_name=FONT_FAMILY,
             font_size="11.5sp",
             bold=True,
@@ -1222,8 +1322,75 @@ class SettingsScreen(Screen):
         lbl_d.bind(size=lbl_d.setter('text_size'))
         card_dest.add_widget(lbl_d)
 
+        # Active Location Summary Badge
+        current_dest = self.cfg.get("download_dir", engine.get_default_download_dir())
+        self.lbl_folder_desc = Label(
+            text="📍 Phone Downloads (Public)",
+            font_name=FONT_FAMILY,
+            font_size="12.5sp",
+            bold=True,
+            color=COLOR_GOLD,
+            size_hint_y=None,
+            height=dp(22),
+            halign="left",
+            valign="middle"
+        )
+        self.lbl_folder_desc.bind(size=self.lbl_folder_desc.setter('text_size'))
+        card_dest.add_widget(self.lbl_folder_desc)
+
+        # Storage Presets Title
+        lbl_presets_title = Label(
+            text="QUICK STORAGE PRESETS (TAP TO SWITCH)",
+            font_name=FONT_FAMILY,
+            font_size="10.5sp",
+            bold=True,
+            color=COLOR_TEXT_MUTED,
+            size_hint_y=None,
+            height=dp(18),
+            halign="left",
+            valign="middle"
+        )
+        lbl_presets_title.bind(size=lbl_presets_title.setter('text_size'))
+        card_dest.add_widget(lbl_presets_title)
+
+        # Presets Grid (2x2)
+        self.grid_presets = GridLayout(cols=2, spacing=dp(8), size_hint_y=None, height=dp(86))
+        self.preset_btns = {}
+        presets = engine.get_storage_presets()
+        preset_icons = {
+            "downloads": "📂 DOWNLOADS",
+            "movies": "🎬 MOVIES",
+            "music": "🎵 MUSIC",
+            "documents": "📁 DOCUMENTS"
+        }
+        for p in presets:
+            pid = p.get("id")
+            title = preset_icons.get(pid, f"📁 {p.get('title', '').upper()}")
+            tip = f"Save downloads to {p.get('desc', p.get('title'))}."
+            btn = GoldButton(text=title, is_outline=True, height_dp=38, tooltip=tip)
+            btn.lbl.font_size = "12sp"
+            btn.bind(on_release=lambda inst, pid=pid, path=p.get('path'), desc=p.get('desc'): self.select_preset_folder(pid, path, desc))
+            self.preset_btns[pid] = btn
+            self.grid_presets.add_widget(btn)
+        card_dest.add_widget(self.grid_presets)
+
+        # Custom Path Section
+        lbl_custom_title = Label(
+            text="STORAGE PATH (OR ENTER CUSTOM DIRECTORY)",
+            font_name=FONT_FAMILY,
+            font_size="10.5sp",
+            bold=True,
+            color=COLOR_TEXT_MUTED,
+            size_hint_y=None,
+            height=dp(18),
+            halign="left",
+            valign="middle"
+        )
+        lbl_custom_title.bind(size=lbl_custom_title.setter('text_size'))
+        card_dest.add_widget(lbl_custom_title)
+
         self.input_dest = TextInput(
-            text=self.cfg.get("download_dir", engine.get_default_download_dir()),
+            text=current_dest,
             font_name=FONT_FAMILY,
             font_size="12sp",
             multiline=False,
@@ -1237,7 +1404,7 @@ class SettingsScreen(Screen):
         card_dest.add_widget(self.input_dest)
 
         row_dest_act = BoxLayout(orientation="horizontal", spacing=dp(8), size_hint_y=None, height=dp(38))
-        btn_save_dest = GoldButton(text="SAVE FOLDER", is_outline=False, height_dp=38, size_hint_x=0.5, tooltip="Saves custom destination path to app settings.")
+        btn_save_dest = GoldButton(text="APPLY PATH", is_outline=False, height_dp=38, size_hint_x=0.5, tooltip="Applies and validates custom storage destination.")
         btn_save_dest.bind(on_release=self.save_folder)
         btn_reset_dest = GoldButton(text="RESET DEFAULT", is_outline=True, height_dp=38, size_hint_x=0.5, tooltip="Restores default storage path to device Downloads folder.")
         btn_reset_dest.bind(on_release=self.reset_folder)
@@ -1338,6 +1505,30 @@ class SettingsScreen(Screen):
         scroll.add_widget(content)
         root.add_widget(scroll)
         self.add_widget(root)
+        self.update_preset_button_states()
+
+    def select_preset_folder(self, preset_id, preset_path, preset_desc):
+        verified = engine.ensure_valid_download_dir(preset_path)
+        self.cfg["download_dir"] = verified
+        engine.save_settings(self.cfg)
+        self.input_dest.text = verified
+        self.lbl_folder_desc.text = f"📍 {preset_desc}"
+        self.update_preset_button_states(preset_id)
+
+    def update_preset_button_states(self, active_id=None):
+        current_dir = os.path.normpath(self.cfg.get("download_dir", engine.get_default_download_dir())).lower()
+        presets = engine.get_storage_presets()
+        if not active_id:
+            for p in presets:
+                if os.path.normpath(p.get("path", "")).lower() == current_dir:
+                    active_id = p.get("id")
+                    self.lbl_folder_desc.text = f"📍 {p.get('desc', p.get('title'))}"
+                    break
+            if not active_id:
+                self.lbl_folder_desc.text = "📍 Custom Storage Folder"
+
+        for pid, btn in self.preset_btns.items():
+            btn.set_outline(pid != active_id)
 
     def set_transition_style(self, style):
         self.cfg["transition_style"] = style
@@ -1348,14 +1539,18 @@ class SettingsScreen(Screen):
     def save_folder(self, *args):
         p = self.input_dest.text.strip()
         if p:
-            self.cfg["download_dir"] = p
+            verified = engine.ensure_valid_download_dir(p)
+            self.input_dest.text = verified
+            self.cfg["download_dir"] = verified
             engine.save_settings(self.cfg)
+            self.update_preset_button_states()
 
     def reset_folder(self, *args):
         d = engine.get_default_download_dir()
         self.input_dest.text = d
         self.cfg["download_dir"] = d
         engine.save_settings(self.cfg)
+        self.update_preset_button_states("downloads")
 
     def toggle_dup(self, *args):
         cur = self.cfg.get("ignore_dups", True)
@@ -1436,6 +1631,46 @@ class UniversalDownloaderMobileApp(App):
         Window.bind(on_touch_up=self._on_window_touch_up)
 
         Clock.schedule_once(self.check_android_share_intent, 0.5)
+
+        # Background migration: migrate any legacy downloads trapped in private storage
+        def _migrate_legacy_downloads():
+            try:
+                if not IS_ANDROID:
+                    return
+                time.sleep(1.0)
+                PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                activity = PythonActivity.mActivity
+                Environment = autoclass('android.os.Environment')
+                ext_dir = activity.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+                if not ext_dir:
+                    return
+                ext_path = ext_dir.getAbsolutePath()
+                if not os.path.isdir(ext_path):
+                    return
+                pub_path = engine.get_public_download_dir()
+                if not pub_path or not os.path.isdir(pub_path) or pub_path == ext_path:
+                    return
+
+                MediaScannerConnection = autoclass('android.media.MediaScannerConnection')
+                migrated = []
+                for fname in os.listdir(ext_path):
+                    src_f = os.path.join(ext_path, fname)
+                    if os.path.isfile(src_f) and not fname.startswith('.'):
+                        dest_f = os.path.join(pub_path, fname)
+                        try:
+                            if not os.path.exists(dest_f):
+                                shutil.copy2(src_f, dest_f)
+                            if os.path.exists(dest_f):
+                                migrated.append(dest_f)
+                        except Exception:
+                            pass
+                if migrated:
+                    MediaScannerConnection.scanFile(activity, migrated, None, None)
+                    Clock.schedule_once(lambda dt: self.manager_screen.populate_from_disk(), 1.0)
+            except Exception:
+                pass
+
+        threading.Thread(target=_migrate_legacy_downloads, daemon=True).start()
 
         return self.master_layout
 

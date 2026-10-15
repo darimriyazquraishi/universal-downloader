@@ -98,15 +98,15 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: github.ref == 'refs/heads/main'
         with:
-          tag_name: v1.0.7-mobile
-          name: Universal Downloader Android APK v1.0.7
+          tag_name: v1.0.8-mobile
+          name: Universal Downloader Android APK v1.0.8
           body: |
-            ### 📱 Universal Downloader for Android (v1.0.7)
-            - **Resolved Android Download Crash**: Fixed fundamental Kivy `ProcessingStream` buffer incompatibility with `yt-dlp` error reporting that previously caused instant termination when downloading media.
-            - **YouTube Client Extraction & Fallbacks**: Integrated dedicated mobile player client extractor args (`android`, `ios`, `web`) to ensure reliable retrieval of single-stream progressive MP4 and native audio streams without FFmpeg.
-            - **Defensive Manager & File Intents**: Modernized `open_file` with Android StrictMode VmPolicy relaxation to eliminate `FileUriExposedException`, and replaced desktop file manager invocations with safe Android Intents.
-            - **Protected Clock Event Loop**: Fully guarded all background thread UI callbacks with defensive try-except blocks to keep the Kivy application alive under all network edge cases.
-            - **Verified Signature**: Clean production signature signed with 2048-bit RSA key across APK Signature Schemes v1, v2, and v3 under package domain `com.universalmedia`.
+            ### 📱 Universal Downloader for Android (v1.0.8)
+            - **Public Downloads Storage**: Media is now saved directly into the device's public Download directory (`/storage/emulated/0/Download`), allowing external video players, music players, and system gallery to access and play downloaded clips without sandbox permission restrictions.
+            - **Native Downloads Folder Viewer**: Fixed "Access is denied" when tapping FOLDER by integrating Android's native `DownloadManager.ACTION_VIEW_DOWNLOADS` and system document viewer.
+            - **One-Tap Storage Presets**: Added intuitive preset buttons in Settings (`📂 DOWNLOADS`, `🎬 MOVIES`, `🎵 MUSIC`, `📁 DOCUMENTS`) with instant visual feedback and custom directory validation.
+            - **Auto-Sync & Manager Refresh**: Added a `REFRESH FILES` action in the Download Manager to scan storage for existing media files, and automatically migrated any downloads trapped in legacy isolated app storage.
+            - **Verified Signature**: Signed with 2048-bit RSA key across APK Signature Schemes v1, v2, and v3 under package domain `com.universalmedia`.
           files: android_app/bin/*.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
