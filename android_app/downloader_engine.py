@@ -143,48 +143,116 @@ def ensure_valid_download_dir(dir_path=None):
 
     return get_default_download_dir()
 
-def get_storage_presets():
-    """Return available storage location presets for UI selection."""
-    presets = []
+def uri_to_path(uri_obj):
+    """Convert Android Storage Access Framework content/tree Uri to filesystem path."""
+    try:
+        uri_str = uri_obj.toString() if hasattr(uri_obj, 'toString') else str(uri_obj)
+        import urllib.parse
+        decoded = urllib.parse.unquote(uri_str)
+        if "primary:" in decoded:
+            rel = decoded.split("primary:")[-1].strip("/")
+            full = f"/storage/emulated/0/{rel}" if rel else "/storage/emulated/0"
+            return os.path.normpath(full).replace("\\", "/")
+        elif "/tree/" in decoded:
+            part = decoded.split("/tree/")[-1]
+            if ":" in part:
+                storage_id, rel = part.split(":", 1)
+                storage_id = storage_id.strip("/")
+                rel = rel.strip("/")
+                if storage_id == "primary":
+                    return os.path.normpath(f"/storage/emulated/0/{rel}").replace("\\", "/")
+                else:
+                    return os.path.normpath(f"/storage/{storage_id}/{rel}").replace("\\", "/")
+        elif uri_str.startswith("file://"):
+            return uri_str[7:]
+    except Exception:
+        pass
+    return None
+
+def get_history_path():
+    """Path to app-specific download history JSON file."""
     if IS_ANDROID:
         try:
-            p_dl = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).getAbsolutePath()
-            presets.append({"id": "downloads", "title": "Downloads", "path": p_dl, "desc": "Phone Downloads (Public)"})
+            PythonActivity = autoclass('org.kivy.android.PythonActivity')
+            activity = PythonActivity.mActivity
+            files_dir = activity.getFilesDir().getAbsolutePath()
+            return os.path.join(files_dir, "download_history.json")
         except Exception:
-            presets.append({"id": "downloads", "title": "Downloads", "path": "/storage/emulated/0/Download", "desc": "Phone Downloads (Public)"})
+            pass
+    appdata = os.getenv("APPDATA") or os.path.expanduser("~")
+    cfg_dir = os.path.join(appdata, ".universal_downloader_mobile")
+    os.makedirs(cfg_dir, exist_ok=True)
+    return os.path.join(cfg_dir, "download_history.json")
 
+def load_history():
+    """Load items downloaded strictly through this app."""
+    p = get_history_path()
+    if os.path.exists(p):
         try:
-            p_mov = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES).getAbsolutePath()
-            presets.append({"id": "movies", "title": "Movies", "path": p_mov, "desc": "Movies Folder (Public)"})
+            with open(p, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    return data
         except Exception:
-            presets.append({"id": "movies", "title": "Movies", "path": "/storage/emulated/0/Movies", "desc": "Movies Folder (Public)"})
+            pass
+        return []
 
-        try:
-            p_mus = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC).getAbsolutePath()
-            presets.append({"id": "music", "title": "Music", "path": p_mus, "desc": "Music Folder (Public)"})
-        except Exception:
-            presets.append({"id": "music", "title": "Music", "path": "/storage/emulated/0/Music", "desc": "Music Folder (Public)"})
+    # First launch seeding: include only app-downloaded media, strictly excluding system/trash/Reddit
+    seeded = []
+    try:
+        pub = get_public_download_dir()
+        if os.path.isdir(pub):
+            for f in os.listdir(pub):
+                fl = f.lower()
+                if fl.startswith(('.', 'rdt_', 'screenshot', 'screen_recording', 'vid_', 'img_')):
+                    continue
+                if fl.endswith(('.mp4', '.mp3', '.m4a', '.webm')):
+                    full_f = os.path.join(pub, f)
+                    if os.path.isfile(full_f):
+                        name_base = os.path.splitext(f)[0]
+                        fmt_tag = "MP4" if fl.endswith(('.mp4', '.webm')) else "MP3"
+                        seeded.append({
+                            "name": name_base,
+                            "path": full_f,
+                            "format": fmt_tag,
+                            "time": os.path.getmtime(full_f)
+                        })
+            seeded.sort(key=lambda x: x["time"], reverse=True)
+            seeded = seeded[:20]
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            with open(p, "w", encoding="utf-8") as out_f:
+                json.dump(seeded, out_f, indent=2)
+    except Exception:
+        pass
+    return seeded
 
-        try:
-            p_doc = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS).getAbsolutePath()
-            presets.append({"id": "documents", "title": "Documents", "path": p_doc, "desc": "Documents Folder (Public)"})
-        except Exception:
-            presets.append({"id": "documents", "title": "Documents", "path": "/storage/emulated/0/Documents", "desc": "Documents Folder (Public)"})
-    else:
-        user_downloads = os.path.join(os.path.expanduser("~"), "Downloads")
-        presets.append({"id": "downloads", "title": "Downloads", "path": os.path.normpath(os.path.join(user_downloads, "Media Downloads")), "desc": "User Downloads"})
-        user_videos = os.path.join(os.path.expanduser("~"), "Videos")
-        if os.path.exists(user_videos):
-            presets.append({"id": "movies", "title": "Videos", "path": os.path.normpath(os.path.join(user_videos, "Media Downloads")), "desc": "User Videos"})
-        user_music = os.path.join(os.path.expanduser("~"), "Music")
-        if os.path.exists(user_music):
-            presets.append({"id": "music", "title": "Music", "path": os.path.normpath(os.path.join(user_music, "Media Downloads")), "desc": "User Music"})
-        user_docs = os.path.join(os.path.expanduser("~"), "Documents")
-        if os.path.exists(user_docs):
-            presets.append({"id": "documents", "title": "Documents", "path": os.path.normpath(os.path.join(user_docs, "Media Downloads")), "desc": "User Documents"})
+def add_to_history(name, path, fmt_tag="MP4"):
+    """Record an item downloaded by this app."""
+    try:
+        items = load_history()
+        items = [it for it in items if it.get("name") != name]
+        items.insert(0, {
+            "name": name,
+            "path": path,
+            "format": fmt_tag,
+            "time": time.time()
+        })
+        items = items[:100]
+        p = get_history_path()
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(items, f, indent=2)
+    except Exception:
+        pass
 
-
-    return presets
+def clear_history():
+    """Clear app download history."""
+    try:
+        p = get_history_path()
+        if os.path.exists(p):
+            os.remove(p)
+    except Exception:
+        pass
 
 
 def get_config_path():

@@ -25,7 +25,7 @@ icon.filename = %(source.dir)s/assets/icon.png
 presplash.filename = %(source.dir)s/assets/icon.png
 
 # (str) Application versioning
-version = 1.0.8
+version = 1.0.9
 
 # (list) Application requirements
 # comma separated e.g. requirements = sqlite3,kivy

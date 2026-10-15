@@ -969,6 +969,9 @@ class HomeScreen(Screen):
             self.lbl_speed.text = "SPEED: --"
             self.lbl_eta.text = "ETA: --"
             try:
+                fmt_tag = "MP4" if full_path.lower().endswith(('.mp4', '.mkv', '.webm')) else "MP3"
+                engine.add_to_history(name, full_path, fmt_tag)
+                self.app_ref.manager_screen.add_item(name, "✓ Saved", full_path, fmt_tag)
                 self.app_ref.manager_screen.mark_completed(name, full_path)
             except Exception:
                 pass
@@ -1033,7 +1036,7 @@ class ManagerScreen(Screen):
         self.list_layout.bind(minimum_height=self.list_layout.setter('height'))
 
         self.lbl_empty = Label(
-            text="No active downloads or history yet.\nDownloaded clips will appear here.",
+            text="No downloads yet.\nMedia downloaded in this app will appear here.",
             font_name=FONT_FAMILY,
             font_size="13sp",
             color=COLOR_TEXT_MUTED,
@@ -1047,51 +1050,37 @@ class ManagerScreen(Screen):
         scroll.add_widget(self.list_layout)
         root.add_widget(scroll)
 
-        row_mgr_acts = BoxLayout(orientation="horizontal", spacing=dp(8), size_hint_y=None, height=dp(42))
-        btn_refresh = GoldButton(text="REFRESH FILES", is_outline=False, height_dp=42, size_hint_x=0.5, tooltip="Scan storage folder for downloaded media files.")
-        btn_refresh.bind(on_release=lambda *_: self.populate_from_disk())
-        btn_clear = GoldButton(text="CLEAR LIST", is_outline=True, height_dp=42, size_hint_x=0.5, tooltip="Clears the download history list from display.")
+        btn_clear = GoldButton(text="CLEAR LIST", is_outline=True, height_dp=42, tooltip="Clears the download history list from display.")
         btn_clear.bind(on_release=self.clear_all)
-        row_mgr_acts.add_widget(btn_refresh)
-        row_mgr_acts.add_widget(btn_clear)
-        root.add_widget(row_mgr_acts)
+        root.add_widget(btn_clear)
 
         self.add_widget(root)
-        Clock.schedule_once(lambda dt: self.populate_from_disk(), 0.6)
+        Clock.schedule_once(lambda dt: self.load_app_downloads(), 0.5)
 
     def on_pre_enter(self, *args):
         super().on_pre_enter(*args)
-        self.populate_from_disk()
+        self.load_app_downloads()
 
-    def populate_from_disk(self):
+    def load_app_downloads(self):
         try:
-            cfg = engine.load_settings()
-            dest_dir = cfg.get("download_dir", engine.get_default_download_dir())
-            dirs_to_check = [dest_dir]
-            pub_dir = engine.get_public_download_dir()
-            if pub_dir and pub_dir not in dirs_to_check and os.path.isdir(pub_dir):
-                dirs_to_check.append(pub_dir)
-            
-            found_files = []
-            for d in dirs_to_check:
-                if os.path.isdir(d):
-                    try:
-                        for f in os.listdir(d):
-                            if f.lower().endswith(('.mp4', '.mp3', '.m4a', '.webm', '.mkv', '.wav')):
-                                full_f = os.path.join(d, f)
-                                if os.path.isfile(full_f):
-                                    mtime = os.path.getmtime(full_f)
-                                    found_files.append((mtime, f, full_f))
-                    except Exception:
-                        pass
-            
-            found_files.sort(key=lambda x: x[0], reverse=True)
-            for _, fname, fpath in found_files[:30]:
-                name_base = os.path.splitext(fname)[0]
-                if name_base not in self.items_data:
-                    fmt_tag = "MP4" if fname.lower().endswith(('.mp4', '.mkv', '.webm')) else "MP3"
-                    self.add_item(name_base, "✓ Saved", fpath, fmt_tag)
-                    self.mark_completed(name_base, fpath)
+            items = engine.load_history()
+            if not items:
+                if self.lbl_empty not in self.list_layout.children:
+                    self.list_layout.clear_widgets()
+                    self.items_data.clear()
+                    self.list_layout.add_widget(self.lbl_empty)
+                return
+
+            if self.lbl_empty in self.list_layout.children:
+                self.list_layout.remove_widget(self.lbl_empty)
+
+            for it in items:
+                name = it.get("name", "")
+                path = it.get("path", "")
+                fmt = it.get("format", "MP4")
+                if name and name not in self.items_data:
+                    self.add_item(name, "✓ Saved", path, fmt)
+                    self.mark_completed(name, path)
         except Exception:
             pass
 
@@ -1271,6 +1260,7 @@ class ManagerScreen(Screen):
             pass
 
     def clear_all(self, *args):
+        engine.clear_history()
         self.list_layout.clear_widgets()
         self.items_data.clear()
         self.list_layout.add_widget(self.lbl_empty)
@@ -1306,173 +1296,49 @@ class SettingsScreen(Screen):
         content.bind(minimum_height=content.setter('height'))
 
         # Destination Storage Card
-        card_dest = CardBox(orientation="vertical", padding=dp(12), spacing=dp(10), size_hint_y=None)
+        card_dest = CardBox(orientation="vertical", padding=dp(14), spacing=dp(10), size_hint_y=None)
         card_dest.bind(minimum_height=card_dest.setter('height'))
-        lbl_d = Label(
-            text="DOWNLOAD DESTINATION STORAGE",
-            font_name=FONT_FAMILY,
-            font_size="11.5sp",
-            bold=True,
-            color=COLOR_TEXT_MUTED,
-            size_hint_y=None,
-            height=dp(20),
-            halign="left",
-            valign="middle"
-        )
-        lbl_d.bind(size=lbl_d.setter('text_size'))
-        card_dest.add_widget(lbl_d)
 
-        # Active Location Summary Badge
-        current_dest = self.cfg.get("download_dir", engine.get_default_download_dir())
-        self.lbl_folder_desc = Label(
-            text="📍 Phone Downloads (Public)",
+        lbl_dest_head = Label(
+            text="DOWNLOAD LOCATION",
             font_name=FONT_FAMILY,
-            font_size="12.5sp",
+            font_size="12sp",
             bold=True,
             color=COLOR_GOLD,
             size_hint_y=None,
-            height=dp(22),
-            halign="left",
-            valign="middle"
-        )
-        self.lbl_folder_desc.bind(size=self.lbl_folder_desc.setter('text_size'))
-        card_dest.add_widget(self.lbl_folder_desc)
-
-        # Storage Presets Title
-        lbl_presets_title = Label(
-            text="QUICK STORAGE PRESETS (TAP TO SWITCH)",
-            font_name=FONT_FAMILY,
-            font_size="10.5sp",
-            bold=True,
-            color=COLOR_TEXT_MUTED,
-            size_hint_y=None,
-            height=dp(18),
-            halign="left",
-            valign="middle"
-        )
-        lbl_presets_title.bind(size=lbl_presets_title.setter('text_size'))
-        card_dest.add_widget(lbl_presets_title)
-
-        # Presets Grid (2x2)
-        self.grid_presets = GridLayout(cols=2, spacing=dp(8), size_hint_y=None, height=dp(86))
-        self.preset_btns = {}
-        presets = engine.get_storage_presets()
-        preset_icons = {
-            "downloads": "📂 DOWNLOADS",
-            "movies": "🎬 MOVIES",
-            "music": "🎵 MUSIC",
-            "documents": "📁 DOCUMENTS"
-        }
-        for p in presets:
-            pid = p.get("id")
-            title = preset_icons.get(pid, f"📁 {p.get('title', '').upper()}")
-            tip = f"Save downloads to {p.get('desc', p.get('title'))}."
-            btn = GoldButton(text=title, is_outline=True, height_dp=38, tooltip=tip)
-            btn.lbl.font_size = "12sp"
-            btn.bind(on_release=lambda inst, pid=pid, path=p.get('path'), desc=p.get('desc'): self.select_preset_folder(pid, path, desc))
-            self.preset_btns[pid] = btn
-            self.grid_presets.add_widget(btn)
-        card_dest.add_widget(self.grid_presets)
-
-        # Custom Path Section
-        lbl_custom_title = Label(
-            text="STORAGE PATH (OR ENTER CUSTOM DIRECTORY)",
-            font_name=FONT_FAMILY,
-            font_size="10.5sp",
-            bold=True,
-            color=COLOR_TEXT_MUTED,
-            size_hint_y=None,
-            height=dp(18),
-            halign="left",
-            valign="middle"
-        )
-        lbl_custom_title.bind(size=lbl_custom_title.setter('text_size'))
-        card_dest.add_widget(lbl_custom_title)
-
-        self.input_dest = TextInput(
-            text=current_dest,
-            font_name=FONT_FAMILY,
-            font_size="12sp",
-            multiline=False,
-            size_hint_y=None,
-            height=dp(42),
-            background_color=COLOR_SURFACE_ALT,
-            foreground_color=COLOR_TEXT_WHITE,
-            cursor_color=COLOR_GOLD,
-            padding=[dp(8), dp(8)]
-        )
-        card_dest.add_widget(self.input_dest)
-
-        row_dest_act = BoxLayout(orientation="horizontal", spacing=dp(8), size_hint_y=None, height=dp(38))
-        btn_save_dest = GoldButton(text="APPLY PATH", is_outline=False, height_dp=38, size_hint_x=0.5, tooltip="Applies and validates custom storage destination.")
-        btn_save_dest.bind(on_release=self.save_folder)
-        btn_reset_dest = GoldButton(text="RESET DEFAULT", is_outline=True, height_dp=38, size_hint_x=0.5, tooltip="Restores default storage path to device Downloads folder.")
-        btn_reset_dest.bind(on_release=self.reset_folder)
-        row_dest_act.add_widget(btn_save_dest)
-        row_dest_act.add_widget(btn_reset_dest)
-        card_dest.add_widget(row_dest_act)
-        content.add_widget(card_dest)
-
-        # Batch & Duplicate Preferences
-        card_dups = CardBox(orientation="vertical", padding=dp(12), spacing=dp(10), size_hint_y=None)
-        card_dups.bind(minimum_height=card_dups.setter('height'))
-        lbl_dup_title = Label(
-            text="DOWNLOAD PREFERENCES",
-            font_name=FONT_FAMILY,
-            font_size="11.5sp",
-            bold=True,
-            color=COLOR_TEXT_MUTED,
-            size_hint_y=None,
             height=dp(20),
             halign="left",
             valign="middle"
         )
-        lbl_dup_title.bind(size=lbl_dup_title.setter('text_size'))
-        card_dups.add_widget(lbl_dup_title)
+        lbl_dest_head.bind(size=lbl_dest_head.setter('text_size'))
+        card_dest.add_widget(lbl_dest_head)
 
-        row_dup = BoxLayout(orientation="horizontal", size_hint_y=None, height=dp(38))
-        self.lbl_dup_status = Label(
-            text="Skip Duplicate Downloads: ON",
+        current_dest = self.cfg.get("download_dir", engine.get_default_download_dir())
+        self.lbl_active_path = TextInput(
+            text=current_dest,
             font_name=FONT_FAMILY,
-            font_size="13sp",
-            color=COLOR_TEXT_WHITE,
-            size_hint_x=0.7,
-            halign="left",
-            valign="middle"
-        )
-        self.lbl_dup_status.bind(size=self.lbl_dup_status.setter('text_size'))
-        btn_toggle_dup = GoldButton(text="TOGGLE", is_outline=True, height_dp=34, size_hint_x=0.3, tooltip="Toggles automatic skipping of duplicate downloads.")
-        btn_toggle_dup.bind(on_release=self.toggle_dup)
-        row_dup.add_widget(self.lbl_dup_status)
-        row_dup.add_widget(btn_toggle_dup)
-        card_dups.add_widget(row_dup)
-
-        row_limit = BoxLayout(orientation="horizontal", size_hint_y=None, height=dp(38))
-        lbl_limit = Label(
-            text="Playlist Max Items (0 for all):",
-            font_name=FONT_FAMILY,
-            font_size="12sp",
-            color=COLOR_TEXT_MUTED,
-            size_hint_x=0.7,
-            halign="left",
-            valign="middle"
-        )
-        lbl_limit.bind(size=lbl_limit.setter('text_size'))
-        self.input_limit = TextInput(
-            text=str(self.cfg.get("max_tracks", 0)),
-            font_name=FONT_FAMILY,
-            font_size="12sp",
+            font_size="12.5sp",
+            readonly=True,
             multiline=False,
-            size_hint_x=0.3,
+            size_hint_y=None,
+            height=dp(44),
             background_color=COLOR_SURFACE_ALT,
             foreground_color=COLOR_TEXT_WHITE,
-            cursor_color=COLOR_GOLD
+            cursor_color=COLOR_GOLD,
+            padding=[dp(10), dp(10)]
         )
-        self.input_limit.bind(text=self.save_limit)
-        row_limit.add_widget(lbl_limit)
-        row_limit.add_widget(self.input_limit)
-        card_dups.add_widget(row_limit)
-        content.add_widget(card_dups)
+        card_dest.add_widget(self.lbl_active_path)
+
+        row_path_acts = BoxLayout(orientation="horizontal", spacing=dp(8), size_hint_y=None, height=dp(44))
+        btn_select_path = GoldButton(text="SELECT PATH", is_outline=False, height_dp=44, size_hint_x=0.5, tooltip="Open file explorer to select active download folder.")
+        btn_select_path.bind(on_release=self.open_folder_picker)
+        btn_restore_default = GoldButton(text="RESTORE TO DEFAULT", is_outline=True, height_dp=44, size_hint_x=0.5, tooltip="Restore default public download folder.")
+        btn_restore_default.bind(on_release=self.restore_default)
+        row_path_acts.add_widget(btn_select_path)
+        row_path_acts.add_widget(btn_restore_default)
+        card_dest.add_widget(row_path_acts)
+
+        content.add_widget(card_dest)
 
         # Transition Style Card
         card_trans = CardBox(orientation="vertical", padding=dp(12), spacing=dp(8), size_hint_y=None)
@@ -1505,64 +1371,54 @@ class SettingsScreen(Screen):
         scroll.add_widget(content)
         root.add_widget(scroll)
         self.add_widget(root)
-        self.update_preset_button_states()
 
-    def select_preset_folder(self, preset_id, preset_path, preset_desc):
-        verified = engine.ensure_valid_download_dir(preset_path)
+    def set_active_path(self, new_path):
+        if not new_path:
+            return
+        verified = engine.ensure_valid_download_dir(new_path)
         self.cfg["download_dir"] = verified
         engine.save_settings(self.cfg)
-        self.input_dest.text = verified
-        self.lbl_folder_desc.text = f"📍 {preset_desc}"
-        self.update_preset_button_states(preset_id)
+        self.lbl_active_path.text = verified
 
-    def update_preset_button_states(self, active_id=None):
-        current_dir = os.path.normpath(self.cfg.get("download_dir", engine.get_default_download_dir())).lower()
-        presets = engine.get_storage_presets()
-        if not active_id:
-            for p in presets:
-                if os.path.normpath(p.get("path", "")).lower() == current_dir:
-                    active_id = p.get("id")
-                    self.lbl_folder_desc.text = f"📍 {p.get('desc', p.get('title'))}"
-                    break
-            if not active_id:
-                self.lbl_folder_desc.text = "📍 Custom Storage Folder"
+    def restore_default(self, *args):
+        pub = engine.get_default_download_dir()
+        self.set_active_path(pub)
 
-        for pid, btn in self.preset_btns.items():
-            btn.set_outline(pid != active_id)
+    def open_folder_picker(self, *args):
+        if IS_ANDROID:
+            try:
+                PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                currentActivity = PythonActivity.mActivity
+                Intent = autoclass('android.content.Intent')
+                
+                intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
+                intent.addFlags(
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION |
+                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION |
+                    Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+                )
+                currentActivity.startActivityForResult(intent, 9921)
+                return
+            except Exception:
+                pass
+        else:
+            try:
+                import tkinter as tk
+                from tkinter import filedialog
+                root = tk.Tk()
+                root.withdraw()
+                folder = filedialog.askdirectory(initialdir=self.cfg.get("download_dir", engine.get_default_download_dir()))
+                root.destroy()
+                if folder:
+                    self.set_active_path(folder)
+            except Exception:
+                pass
 
     def set_transition_style(self, style):
         self.cfg["transition_style"] = style
         engine.save_settings(self.cfg)
         self.btn_t_slide.set_outline(style != "slide")
         self.btn_t_fade.set_outline(style != "fade")
-
-    def save_folder(self, *args):
-        p = self.input_dest.text.strip()
-        if p:
-            verified = engine.ensure_valid_download_dir(p)
-            self.input_dest.text = verified
-            self.cfg["download_dir"] = verified
-            engine.save_settings(self.cfg)
-            self.update_preset_button_states()
-
-    def reset_folder(self, *args):
-        d = engine.get_default_download_dir()
-        self.input_dest.text = d
-        self.cfg["download_dir"] = d
-        engine.save_settings(self.cfg)
-        self.update_preset_button_states("downloads")
-
-    def toggle_dup(self, *args):
-        cur = self.cfg.get("ignore_dups", True)
-        new_val = not cur
-        self.cfg["ignore_dups"] = new_val
-        self.lbl_dup_status.text = f"Skip Duplicate Downloads: {'ON' if new_val else 'OFF'}"
-        engine.save_settings(self.cfg)
-
-    def save_limit(self, instance, val):
-        if val.isdigit():
-            self.cfg["max_tracks"] = int(val)
-            engine.save_settings(self.cfg)
 
 
 # ==========================================================
@@ -1666,13 +1522,38 @@ class UniversalDownloaderMobileApp(App):
                             pass
                 if migrated:
                     MediaScannerConnection.scanFile(activity, migrated, None, None)
-                    Clock.schedule_once(lambda dt: self.manager_screen.populate_from_disk(), 1.0)
+                    Clock.schedule_once(lambda dt: self.manager_screen.load_app_downloads(), 1.0)
             except Exception:
                 pass
 
         threading.Thread(target=_migrate_legacy_downloads, daemon=True).start()
 
+        if IS_ANDROID:
+            try:
+                from android import activity
+                activity.bind(on_activity_result=self.on_android_activity_result)
+            except Exception:
+                pass
+
         return self.master_layout
+
+    def on_android_activity_result(self, request_code, result_code, intent):
+        if request_code == 9921 and result_code == -1 and intent is not None:
+            try:
+                uri = intent.getData()
+                if uri:
+                    try:
+                        PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                        Intent = autoclass('android.content.Intent')
+                        takeFlags = intent.getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                        PythonActivity.mActivity.getContentResolver().takePersistableUriPermission(uri, takeFlags)
+                    except Exception:
+                        pass
+                    resolved_path = engine.uri_to_path(uri)
+                    if resolved_path:
+                        Clock.schedule_once(lambda dt: self.settings_screen.set_active_path(resolved_path), 0)
+            except Exception:
+                pass
 
     def _on_window_touch_down(self, win, touch):
         # Ignore touches on or below the bottom navigation bar (height dp(64) + padding)

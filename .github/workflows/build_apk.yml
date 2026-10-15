@@ -98,14 +98,14 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: github.ref == 'refs/heads/main'
         with:
-          tag_name: v1.0.8-mobile
-          name: Universal Downloader Android APK v1.0.8
+          tag_name: v1.0.9-mobile
+          name: Universal Downloader Android APK v1.0.9
           body: |
-            ### 📱 Universal Downloader for Android (v1.0.8)
-            - **Public Downloads Storage**: Media is now saved directly into the device's public Download directory (`/storage/emulated/0/Download`), allowing external video players, music players, and system gallery to access and play downloaded clips without sandbox permission restrictions.
-            - **Native Downloads Folder Viewer**: Fixed "Access is denied" when tapping FOLDER by integrating Android's native `DownloadManager.ACTION_VIEW_DOWNLOADS` and system document viewer.
-            - **One-Tap Storage Presets**: Added intuitive preset buttons in Settings (`📂 DOWNLOADS`, `🎬 MOVIES`, `🎵 MUSIC`, `📁 DOCUMENTS`) with instant visual feedback and custom directory validation.
-            - **Auto-Sync & Manager Refresh**: Added a `REFRESH FILES` action in the Download Manager to scan storage for existing media files, and automatically migrated any downloads trapped in legacy isolated app storage.
+            ### 📱 Universal Downloader for Android (v1.0.9)
+            - **App-Only Download Manager**: The Download Manager now exclusively displays media downloaded within the app. Discovered non-app files (e.g., Reddit videos, trashed files) are filtered out completely.
+            - **Native Folder Picker (SAF)**: Tapping "SELECT PATH" in Settings launches the system file explorer (`ACTION_OPEN_DOCUMENT_TREE`) to pick any custom folder on device storage and activate it instantly.
+            - **Streamlined Settings**: Removed extra presets, duplicate preferences card, and icons for a clean two-button path controller: "SELECT PATH" and "RESTORE TO DEFAULT" (public Downloads folder).
+            - **Persistent History**: Download history is maintained in app storage and synchronizes seamlessly across app restarts.
             - **Verified Signature**: Signed with 2048-bit RSA key across APK Signature Schemes v1, v2, and v3 under package domain `com.universalmedia`.
           files: android_app/bin/*.apk
         env:
