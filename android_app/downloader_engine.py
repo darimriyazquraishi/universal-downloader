@@ -19,16 +19,58 @@ except Exception:
 def get_default_download_dir():
     """Determine default storage directory for Android vs Desktop simulator."""
     if IS_ANDROID:
+        # Priority 1: App's dedicated external downloads directory (guaranteed writable without special permissions)
+        try:
+            PythonActivity = autoclass('org.kivy.android.PythonActivity')
+            activity = PythonActivity.mActivity
+            ext_dir = activity.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+            if ext_dir:
+                path = ext_dir.getAbsolutePath()
+                os.makedirs(path, exist_ok=True)
+                return path
+        except Exception:
+            pass
+
+        # Priority 2: Public Download folder directly (already exists, avoid creating unpermitted subdirs on Android 11+)
         try:
             download_dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).getAbsolutePath()
-            return os.path.join(download_dir, "Media Downloads")
+            if os.path.isdir(download_dir):
+                return download_dir
         except Exception:
-            return "/storage/emulated/0/Download/Media Downloads"
+            pass
+
+        for candidate in ["/storage/emulated/0/Download", "/sdcard/Download"]:
+            if os.path.isdir(candidate):
+                return candidate
+
+        return "/storage/emulated/0/Download"
     else:
         user_downloads = os.path.join(os.path.expanduser("~"), "Downloads")
         if os.path.exists(user_downloads):
             return os.path.normpath(os.path.join(user_downloads, "Media Downloads"))
         return os.path.normpath(os.path.join(os.path.dirname(__file__), "downloads"))
+
+def ensure_valid_download_dir(dir_path=None):
+    """Ensure directory exists and is writable, returning a safe, verified path."""
+    if dir_path:
+        # Clean any legacy unpermitted subfolder path on Android
+        if IS_ANDROID and dir_path.endswith("Media Downloads"):
+            parent = os.path.dirname(dir_path)
+            if os.path.isdir(parent):
+                dir_path = parent
+
+        try:
+            os.makedirs(dir_path, exist_ok=True)
+            test_file = os.path.join(dir_path, ".write_test")
+            with open(test_file, "w") as f:
+                f.write("1")
+            if os.path.exists(test_file):
+                os.remove(test_file)
+            return dir_path
+        except Exception:
+            pass
+
+    return get_default_download_dir()
 
 def get_config_path():
     """Path to settings JSON file."""
@@ -61,6 +103,7 @@ def load_settings():
                 default_cfg.update(data)
     except Exception:
         pass
+    default_cfg["download_dir"] = ensure_valid_download_dir(default_cfg.get("download_dir"))
     return default_cfg
 
 def save_settings(cfg):

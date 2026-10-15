@@ -98,16 +98,16 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: github.ref == 'refs/heads/main'
         with:
-          tag_name: v1.0.5-mobile
-          name: Universal Downloader Android APK v1.0.5
+          tag_name: v1.0.6-mobile
+          name: Universal Downloader Android APK v1.0.6
           body: |
-            ### 📱 Universal Downloader for Android (v1.0.5)
-            - **Sequential Tab Swiping**: Fixed swipe navigation to reliably transition between Downloader ➔ Manager ➔ Settings without skipping any screen.
-            - **Verified Signature & Trust**: Signed with high-security 2048-bit RSA certificate (APK Signature Scheme v1, v2, and v3) under package domain `com.universalmedia`.
-            - **Safe Permission Profile**: Removed `MANAGE_EXTERNAL_STORAGE` and unnecessary permissions to eliminate security/Play Protect false-positive flags.
-            - **Touch Gestures**: Debounced touch release switching with automatic button cancellation.
-            - **Universal Media Engine**: Direct video and audio downloads from YouTube, Instagram, TikTok, Facebook, X, and more.
-            - **Android Share Sheet**: Share links directly from any browser or social app into Universal Downloader.
+            ### 📱 Universal Downloader for Android (v1.0.6)
+            - **Download Crash Fix**: Fixed Scoped Storage directory resolution and unhandled directory creation errors. Guaranteed writable storage path without requiring dangerous permissions.
+            - **Native Progressive Streams**: Optimized download engine on Android to use single-file progressive streams (video + audio pre-muxed) requiring zero external FFmpeg binaries.
+            - **Crash-Proof Download Worker**: Wrapped download initialization and background thread in comprehensive safety guards to prevent app termination.
+            - **Gallery Auto-Indexing**: Integrated Android `MediaScannerConnection` so completed downloads appear automatically in Google Files, Gallery, and Music players.
+            - **Sequential Tab Swiping**: Smooth, reliable tab switching between Downloader ➔ Manager ➔ Settings.
+            - **Verified Signature**: Signed with 2048-bit RSA key across APK Signature Schemes v1, v2, and v3 under domain `com.universalmedia`.
           files: android_app/bin/*.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

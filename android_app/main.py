@@ -699,124 +699,170 @@ class HomeScreen(Screen):
             self.chip_size.text = f"~{res['size_estimate']}"
 
     def action_start_download(self, *args):
-        url = self.input_url.text.strip()
-        if not url:
-            self.lbl_progress_status.text = "Please paste a link first."
-            return
+        try:
+            url = self.input_url.text.strip()
+            if not url:
+                self.lbl_progress_status.text = "Please paste a link first."
+                return
 
-        cfg = engine.load_settings()
-        dest_dir = cfg.get("download_dir", engine.get_default_download_dir())
-        os.makedirs(dest_dir, exist_ok=True)
+            cfg = engine.load_settings()
+            dest_dir = engine.ensure_valid_download_dir(cfg.get("download_dir"))
 
-        # Smart target URL resolution: Single video vs Playlist
-        parsed = engine.parse_url_structure(url)
-        target_download_url = url
-        if self.active_analysis and self.active_analysis.get("has_both"):
-            if self.active_analysis.get("active_scope") == "single":
-                target_download_url = self.active_analysis.get("clean_video_url") or url
-        elif parsed.get("is_mix") and parsed.get("clean_video_url"):
-            # Auto-guard against dynamic radio mixes when user didn't explicitly inspect & switch to playlist
-            target_download_url = parsed["clean_video_url"]
+            # Smart target URL resolution: Single video vs Playlist
+            parsed = engine.parse_url_structure(url)
+            target_download_url = url
+            if self.active_analysis and self.active_analysis.get("has_both"):
+                if self.active_analysis.get("active_scope") == "single":
+                    target_download_url = self.active_analysis.get("clean_video_url") or url
+            elif parsed.get("is_mix") and parsed.get("clean_video_url"):
+                target_download_url = parsed["clean_video_url"]
 
-        self.is_downloading = True
-        self.stop_event.clear()
-        self.btn_download.set_text("DOWNLOADING...")
-        self.bar_progress.value = 0
-        self.lbl_pct.text = "0%"
-        self.lbl_progress_status.text = "Preparing media stream..."
+            self.is_downloading = True
+            self.stop_event.clear()
+            self.btn_download.set_text("DOWNLOADING...")
+            self.bar_progress.value = 0
+            self.lbl_pct.text = "0%"
+            self.lbl_progress_status.text = "Preparing media stream..."
 
-        def worker():
-            platform = engine.detect_platform(target_download_url)
-            is_video = self.selected_format.startswith("video_")
-            bitrate = "320" if self.selected_format == "mp3_320" else ("192" if self.selected_format == "mp3_192" else "128")
+            def worker():
+                filename_base = "Media_Download"
+                full_path = ""
+                try:
+                    platform = engine.detect_platform(target_download_url)
+                    is_video = self.selected_format.startswith("video_")
+                    bitrate = "320" if self.selected_format == "mp3_320" else ("192" if self.selected_format == "mp3_192" else "128")
 
-            title = self.active_analysis['title'] if self.active_analysis else f"{platform} Clip"
-            cleaned = engine.clean_filename(title, 1)
-            ext_target = "mp4" if is_video else ("m4a" if self.selected_format == "m4a" else "mp3")
+                    title = self.active_analysis['title'] if self.active_analysis else f"{platform} Clip"
+                    cleaned = engine.clean_filename(title, 1)
+                    ext_target = "mp4" if is_video else ("m4a" if self.selected_format == "m4a" else "mp3")
 
-            if is_video:
-                if self.selected_format == "video_1080":
-                    q_tag = "1080p"
-                elif self.selected_format == "video_720":
-                    q_tag = "720p"
-                elif self.selected_format == "video_480":
-                    q_tag = "480p"
-                else:
-                    q_tag = "Best"
-                clean_title = re.sub(r'\s*\[(best|1080p?|720p?|480p?|320k|192k|128k|m4a)\]$', '', cleaned, flags=re.IGNORECASE)
-                filename_base = f"{clean_title} [{q_tag}]"
-            else:
-                q_tag = "320k" if self.selected_format == "mp3_320" else ("192k" if self.selected_format == "mp3_192" else ("m4a" if self.selected_format == "m4a" else "128k"))
-                plain_path = os.path.join(dest_dir, f"{cleaned}.{ext_target}")
-                if os.path.exists(plain_path):
-                    clean_title = re.sub(r'\s*\[(320k|192k|128k|m4a)\]$', '', cleaned, flags=re.IGNORECASE)
-                    filename_base = f"{clean_title} [{q_tag}]"
-                else:
-                    filename_base = cleaned
+                    if is_video:
+                        if self.selected_format == "video_1080":
+                            q_tag = "1080p"
+                        elif self.selected_format == "video_720":
+                            q_tag = "720p"
+                        elif self.selected_format == "video_480":
+                            q_tag = "480p"
+                        else:
+                            q_tag = "Best"
+                        clean_title = re.sub(r'\s*\[(best|1080p?|720p?|480p?|320k|192k|128k|m4a)\]$', '', cleaned, flags=re.IGNORECASE)
+                        filename_base = f"{clean_title} [{q_tag}]"
+                    else:
+                        q_tag = "320k" if self.selected_format == "mp3_320" else ("192k" if self.selected_format == "mp3_192" else ("m4a" if self.selected_format == "m4a" else "128k"))
+                        plain_path = os.path.join(dest_dir, f"{cleaned}.{ext_target}")
+                        if os.path.exists(plain_path):
+                            clean_title = re.sub(r'\s*\[(320k|192k|128k|m4a)\]$', '', cleaned, flags=re.IGNORECASE)
+                            filename_base = f"{clean_title} [{q_tag}]"
+                        else:
+                            filename_base = cleaned
 
-            full_path = os.path.join(dest_dir, f"{filename_base}.{ext_target}")
+                    full_path = os.path.join(dest_dir, f"{filename_base}.{ext_target}")
 
-            Clock.schedule_once(lambda dt: self.app_ref.manager_screen.add_item(filename_base, "⏳ Downloading...", full_path, self.selected_format), 0)
+                    Clock.schedule_once(lambda dt: self.app_ref.manager_screen.add_item(filename_base, "⏳ Downloading...", full_path, self.selected_format), 0)
 
-            def progress_hook(d):
-                if self.stop_event.is_set():
-                    raise yt_dlp.utils.DownloadCancelled("Stopped by user")
-                if d['status'] == 'downloading':
-                    total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
-                    downloaded = d.get('downloaded_bytes') or 0
-                    speed = d.get('speed') or 0
-                    speed_str = f"{speed / (1024*1024):.1f} MB/s" if speed else ""
-                    eta = d.get('eta') or 0
-                    eta_str = f"{eta}s" if eta else ""
-                    if total > 0:
-                        pct = (downloaded / total) * 100
-                        Clock.schedule_once(lambda dt: self.update_progress_ui(pct, speed_str, eta_str), 0)
+                    def progress_hook(d):
+                        try:
+                            if self.stop_event.is_set():
+                                raise Exception("Stopped by user")
+                            if d.get('status') == 'downloading':
+                                total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
+                                downloaded = d.get('downloaded_bytes') or 0
+                                speed = d.get('speed') or 0
+                                speed_str = f"{speed / (1024*1024):.1f} MB/s" if speed else ""
+                                eta = d.get('eta') or 0
+                                eta_str = f"{eta}s" if eta else ""
+                                if total > 0:
+                                    pct = min(100.0, max(0.0, (downloaded / total) * 100))
+                                    Clock.schedule_once(lambda dt, p=pct, s=speed_str, e=eta_str: self.update_progress_ui(p, s, e), 0)
+                        except Exception:
+                            pass
 
-            if is_video:
-                if self.selected_format == "video_720":
-                    fmt_str = 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=720]+bestaudio/best[height<=720]/best'
-                elif self.selected_format == "video_480":
-                    fmt_str = 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=480]+bestaudio/best[height<=480]/best'
-                elif self.selected_format == "video_1080":
-                    fmt_str = 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best'
-                else:
-                    fmt_str = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best'
-                opts = {
-                    'quiet': True,
-                    'no_warnings': True,
-                    'format': fmt_str,
-                    'merge_output_format': 'mp4',
-                    'outtmpl': os.path.join(dest_dir, f"{filename_base}.%(ext)s"),
-                    'overwrites': True,
-                    'progress_hooks': [progress_hook],
-                    'http_headers': {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
-                    }
-                }
-            else:
-                postprocessors = [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3' if self.selected_format != 'm4a' else 'm4a', 'preferredquality': bitrate}]
-                opts = {
-                    'quiet': True,
-                    'no_warnings': True,
-                    'format': 'bestaudio/best',
-                    'outtmpl': os.path.join(dest_dir, f"{filename_base}.%(ext)s"),
-                    'overwrites': True,
-                    'progress_hooks': [progress_hook],
-                    'postprocessors': postprocessors,
-                    'http_headers': {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
-                    }
-                }
+                    if IS_ANDROID:
+                        # Android: native pre-muxed single stream without FFmpeg dependency
+                        if is_video:
+                            if self.selected_format == "video_720":
+                                fmt_str = 'best[height<=720][ext=mp4]/best[height<=720]/best[ext=mp4]/best'
+                            elif self.selected_format == "video_480":
+                                fmt_str = 'best[height<=480][ext=mp4]/best[height<=480]/best[ext=mp4]/best'
+                            elif self.selected_format == "video_1080":
+                                fmt_str = 'best[height<=1080][ext=mp4]/best[height<=1080]/best[ext=mp4]/best'
+                            else:
+                                fmt_str = 'best[ext=mp4]/best'
+                            opts = {
+                                'quiet': True,
+                                'no_warnings': True,
+                                'format': fmt_str,
+                                'outtmpl': os.path.join(dest_dir, f"{filename_base}.%(ext)s"),
+                                'overwrites': True,
+                                'progress_hooks': [progress_hook],
+                                'nocheckcertificate': True,
+                                'http_headers': {
+                                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+                                }
+                            }
+                        else:
+                            opts = {
+                                'quiet': True,
+                                'no_warnings': True,
+                                'format': 'bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best',
+                                'outtmpl': os.path.join(dest_dir, f"{filename_base}.%(ext)s"),
+                                'overwrites': True,
+                                'progress_hooks': [progress_hook],
+                                'nocheckcertificate': True,
+                                'http_headers': {
+                                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+                                }
+                            }
+                    else:
+                        # Desktop: use FFmpeg muxing & conversion
+                        if is_video:
+                            if self.selected_format == "video_720":
+                                fmt_str = 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=720]+bestaudio/best[height<=720]/best'
+                            elif self.selected_format == "video_480":
+                                fmt_str = 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=480]+bestaudio/best[height<=480]/best'
+                            elif self.selected_format == "video_1080":
+                                fmt_str = 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best'
+                            else:
+                                fmt_str = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best'
+                            opts = {
+                                'quiet': True,
+                                'no_warnings': True,
+                                'format': fmt_str,
+                                'merge_output_format': 'mp4',
+                                'outtmpl': os.path.join(dest_dir, f"{filename_base}.%(ext)s"),
+                                'overwrites': True,
+                                'progress_hooks': [progress_hook],
+                                'http_headers': {
+                                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+                                }
+                            }
+                        else:
+                            postprocessors = [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3' if self.selected_format != 'm4a' else 'm4a', 'preferredquality': bitrate}]
+                            opts = {
+                                'quiet': True,
+                                'no_warnings': True,
+                                'format': 'bestaudio/best',
+                                'outtmpl': os.path.join(dest_dir, f"{filename_base}.%(ext)s"),
+                                'overwrites': True,
+                                'progress_hooks': [progress_hook],
+                                'postprocessors': postprocessors,
+                                'http_headers': {
+                                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+                                }
+                            }
 
-            try:
-                import yt_dlp
-                with yt_dlp.YoutubeDL(opts) as ydl:
-                    ydl.download([target_download_url])
-                Clock.schedule_once(lambda dt: self.on_download_complete(filename_base, full_path), 0)
-            except Exception as e:
-                Clock.schedule_once(lambda dt: self.on_download_failed(filename_base, str(e)), 0)
+                    import yt_dlp
+                    with yt_dlp.YoutubeDL(opts) as ydl:
+                        ydl.download([target_download_url])
+                    Clock.schedule_once(lambda dt: self.on_download_complete(filename_base, full_path), 0)
+                except Exception as e:
+                    Clock.schedule_once(lambda dt, err=str(e): self.on_download_failed(filename_base, err), 0)
 
-        threading.Thread(target=worker, daemon=True).start()
+            threading.Thread(target=worker, daemon=True).start()
+        except Exception as e:
+            self.is_downloading = False
+            self.btn_download.set_text("START DOWNLOAD")
+            self.lbl_progress_status.text = f"Init error: {str(e)[:45]}"
 
     def update_progress_ui(self, pct, speed, eta):
         Animation.stop_all(self.bar_progress)
@@ -836,14 +882,20 @@ class HomeScreen(Screen):
         self.lbl_speed.text = "SPEED: --"
         self.lbl_eta.text = "ETA: --"
         self.app_ref.manager_screen.mark_completed(name, full_path)
+        if IS_ANDROID:
+            try:
+                MediaScannerConnection = autoclass('android.media.MediaScannerConnection')
+                PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                context = PythonActivity.mActivity
+                MediaScannerConnection.scanFile(context, [full_path], None, None)
+            except Exception:
+                pass
 
     def on_download_failed(self, name, err):
         self.is_downloading = False
         self.btn_download.set_text("START DOWNLOAD")
         self.lbl_progress_status.text = f"Error: {err[:50]}"
         self.app_ref.manager_screen.mark_failed(name)
-
-
 # ==========================================================
 # SCREEN 2: DOWNLOAD MANAGER
 # ==========================================================
