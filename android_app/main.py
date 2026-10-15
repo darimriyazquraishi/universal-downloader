@@ -1259,8 +1259,8 @@ class UniversalDownloaderMobileApp(App):
         if touch.y <= dp(68):
             return False
 
-        # Ignore touches inside the media URL input box so cursor selection is preserved
-        if hasattr(self, 'home_screen') and hasattr(self.home_screen, 'input_url'):
+        # Only ignore touches inside the media URL input box when actively on the Home screen
+        if getattr(self.sm, 'current', '') == "home" and hasattr(self, 'home_screen') and hasattr(self.home_screen, 'input_url'):
             try:
                 if self.home_screen.input_url.collide_point(touch.x, touch.y):
                     return False
@@ -1268,68 +1268,77 @@ class UniversalDownloaderMobileApp(App):
                 pass
 
         touch.ud['tab_swipe_origin'] = (touch.x, touch.y)
-        touch.ud['tab_swipe_switched'] = False
+        touch.ud['tab_swipe_locked'] = False
         return False
 
     def _on_window_touch_move(self, win, touch):
-        if touch.ud.get('tab_swipe_switched', False):
-            return False
         origin = touch.ud.get('tab_swipe_origin')
         if not origin:
             return False
 
         dx = touch.x - origin[0]
         dy = touch.y - origin[1]
-        threshold = dp(45)
 
-        # Ensure clear horizontal dominance so vertical list scrolling is never impeded
-        if abs(dx) >= threshold and abs(dx) > 1.35 * abs(dy):
-            self._handle_tab_swipe(dx, touch)
-            return False
+        # When horizontal gesture begins, ungrab buttons so they don't fire accidental taps
+        if abs(dx) > dp(25) and abs(dx) > 1.3 * abs(dy):
+            for item in list(touch.grab_list):
+                try:
+                    touch.ungrab(item)
+                    if hasattr(item, 'state'):
+                        item.state = 'normal'
+                except Exception:
+                    pass
         return False
 
     def _on_window_touch_up(self, win, touch):
-        if touch.ud.get('tab_swipe_switched', False):
-            return False
         origin = touch.ud.get('tab_swipe_origin')
-        if not origin:
+        if not origin or touch.ud.get('tab_swipe_locked', False):
+            return False
+
+        # Avoid interrupting an ongoing transition
+        if hasattr(self.sm, 'transition') and hasattr(self.sm.transition, 'is_active') and self.sm.transition.is_active:
+            return False
+
+        # Enforce minimum cooldown between consecutive tab swipes
+        now = time.time()
+        if now - getattr(self, '_last_swipe_time', 0) < 0.35:
             return False
 
         dx = touch.x - origin[0]
         dy = touch.y - origin[1]
         threshold = dp(35)
 
-        if abs(dx) >= threshold and abs(dx) > 1.35 * abs(dy):
-            self._handle_tab_swipe(dx, touch)
+        # Require predominantly horizontal swipe
+        if abs(dx) >= threshold and abs(dx) > 1.25 * abs(dy):
+            touch.ud['tab_swipe_locked'] = True
+            self._last_swipe_time = now
+
+            # Ensure all buttons ungrabbed
+            for item in list(touch.grab_list):
+                try:
+                    touch.ungrab(item)
+                    if hasattr(item, 'state'):
+                        item.state = 'normal'
+                except Exception:
+                    pass
+
+            order = ["home", "manager", "settings"]
+            curr = self.sm.current
+            if curr not in order:
+                return False
+            idx = order.index(curr)
+
+            if dx < 0 and idx < len(order) - 1:
+                # Swipe LEFT -> advance EXACTLY 1 screen (Downloader -> Manager -> Settings)
+                next_screen = order[idx + 1]
+                self.switch_screen(next_screen, direction="left")
+            elif dx > 0 and idx > 0:
+                # Swipe RIGHT -> go back EXACTLY 1 screen (Settings -> Manager -> Downloader)
+                prev_screen = order[idx - 1]
+                self.switch_screen(prev_screen, direction="right")
             return False
+
         return False
-
-    def _handle_tab_swipe(self, dx, touch):
-        touch.ud['tab_swipe_switched'] = True
-
-        # Ungrab buttons to cancel accidental button taps during swipe
-        for item in list(touch.grab_list):
-            try:
-                touch.ungrab(item)
-                if hasattr(item, 'state'):
-                    item.state = 'normal'
-            except Exception:
-                pass
-
-        order = ["home", "manager", "settings"]
-        curr = self.sm.current
-        if curr not in order:
-            return
-        idx = order.index(curr)
-
-        if dx < 0 and idx < len(order) - 1:
-            # Swipe LEFT -> advance to next screen (Downloader -> Manager -> Settings)
-            next_screen = order[idx + 1]
-            self.switch_screen(next_screen, direction="left")
-        elif dx > 0 and idx > 0:
-            # Swipe RIGHT -> go back to previous screen (Settings -> Manager -> Downloader)
-            prev_screen = order[idx - 1]
-            self.switch_screen(prev_screen, direction="right")
 
     def switch_screen(self, screen_name, direction=None):
         curr_screen = self.sm.current
