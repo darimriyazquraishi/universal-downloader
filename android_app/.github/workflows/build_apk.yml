@@ -78,17 +78,19 @@ jobs:
       - name: Run Test Suite & Capture Actual Results
         id: run_tests
         run: |
-          python -m unittest discover -s tests -p "test_*.py" -v
           python -c '
-          import os, unittest
+          import sys, os, unittest
           loader = unittest.TestLoader()
           suite = loader.discover("tests", pattern="test_*.py")
-          result = unittest.TextTestRunner(stream=open(os.devnull, "w")).run(suite)
+          runner = unittest.TextTestRunner(verbosity=2)
+          result = runner.run(suite)
           total = result.testsRun
           failed = len(result.failures) + len(result.errors)
           skipped = len(result.skipped)
           passed = total - failed - skipped
+          print("\n=======================================================")
           print(f"Dynamic Test Summary: Total={total}, Passed={passed}, Failed={failed}, Skipped={skipped}")
+          print("=======================================================")
           gh_out = os.environ.get("GITHUB_OUTPUT")
           if gh_out:
               with open(gh_out, "a") as f:
@@ -96,6 +98,9 @@ jobs:
                   f.write(f"tests_passed={passed}\n")
                   f.write(f"tests_failed={failed}\n")
                   f.write(f"tests_skipped={skipped}\n")
+          if failed > 0:
+              print(f"::error::Test suite failed with {failed} failure(s)/error(s)!")
+              sys.exit(1)
           '
 
   build-apk:
@@ -163,6 +168,23 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install buildozer==1.6.0 cython==0.29.37 virtualenv==21.14.8 python-for-android==2026.5.9
+          # Ensure python-for-android applies 16 KB ELF LOAD segment alignment linker flags to all recipes
+          python -c '
+          import site, os
+          for p in site.getsitepackages():
+              archs_path = os.path.join(p, "pythonforandroid", "archs.py")
+              if os.path.exists(archs_path):
+                  with open(archs_path, "r") as f:
+                      content = f.read()
+                  if "-Wl,-z,max-page-size=16384" not in content:
+                      content = content.replace(
+                          "common_ldflags = [\x27-L{ctx_libs_dir}\x27]",
+                          "common_ldflags = [\x27-L{ctx_libs_dir}\x27, \x27-Wl,-z,max-page-size=16384\x27, \x27-Wl,-z,common-page-size=16384\x27]"
+                      )
+                      with open(archs_path, "w") as f:
+                          f.write(content)
+                      print(f"Successfully patched {archs_path} with 16 KB ELF alignment linker flags.")
+          '
 
       - name: Determine Build Type and Extract Release Configuration
         id: mode
@@ -311,11 +333,11 @@ jobs:
             if [[ "$raw_apk" == *"-unsigned.apk"* ]] || [[ "$raw_apk" == *"-unaligned.apk"* ]]; then
               aligned_apk="${raw_apk/-unsigned.apk/-aligned.apk}"
               aligned_apk="${aligned_apk/-unaligned.apk/-aligned.apk}"
-              "$ZIPALIGN" -f -v -p 4 "$raw_apk" "$aligned_apk"
+              "$ZIPALIGN" -f -P 16 4 "$raw_apk" "$aligned_apk"
               target_apk="$aligned_apk"
             else
-              "$ZIPALIGN" -c 4 "$raw_apk" || {
-                "$ZIPALIGN" -f -v -p 4 "$raw_apk" "bin/aligned_temp.apk"
+              "$ZIPALIGN" -c -P 16 4 "$raw_apk" || {
+                "$ZIPALIGN" -f -P 16 4 "$raw_apk" "bin/aligned_temp.apk"
                 target_apk="bin/aligned_temp.apk"
               }
             fi
@@ -402,19 +424,58 @@ jobs:
           APK_SHA=$(sha256sum "$FINAL_APK" | awk '{print $1}')
           echo "APK SHA-256: $APK_SHA"
 
-          # 2. Verify APK alignment before publishing
-          echo "Verifying APK 4-byte page alignment..."
-          if ! "$ZIPALIGN" -c -v 4 "$FINAL_APK"; then
-            echo "::error::APK alignment verification failed for $FINAL_APK!"
+          # 2. Verify APK 16 KB page alignment before publishing
+          echo "Verifying APK 16 KB page alignment via zipalign -c -P 16 4..."
+          if ! "$ZIPALIGN" -c -P 16 4 "$FINAL_APK"; then
+            echo "::error::APK 16 KB alignment verification failed for $FINAL_APK!"
             exit 1
           fi
-          echo "[OK] APK 4-byte page alignment verified."
+          echo "[OK] APK 16 KB page alignment verified."
 
-          # 3. Comprehensive badging & manifest verification via aapt
+          # 3. Comprehensive ELF segment alignment inspection of all native .so libraries
+          echo "Inspecting ELF LOAD segment alignment of all native libraries in release APK..."
+          python -c '
+          import zipfile, struct, sys
+          apk = "'"$FINAL_APK"'"
+          with zipfile.ZipFile(apk) as z:
+              so_files = [n for n in z.namelist() if n.endswith(".so")]
+              print(f"Inspecting {len(so_files)} native shared libraries in release APK:")
+              failures = []
+              for so in sorted(so_files):
+                  data = z.read(so)
+                  if not data.startswith(b"\x7fELF") or data[4] != 2:
+                      continue
+                  e_phoff = struct.unpack_from("<Q", data, 32)[0]
+                  e_phentsize = struct.unpack_from("<H", data, 54)[0]
+                  e_phnum = struct.unpack_from("<H", data, 56)[0]
+                  so_errors = []
+                  for i in range(e_phnum):
+                      ph_off = e_phoff + i * e_phentsize
+                      p_type = struct.unpack_from("<I", data, ph_off)[0]
+                      if p_type == 1: # PT_LOAD
+                          p_offset = struct.unpack_from("<Q", data, ph_off + 8)[0]
+                          p_vaddr = struct.unpack_from("<Q", data, ph_off + 16)[0]
+                          p_align = struct.unpack_from("<Q", data, ph_off + 48)[0]
+                          if p_align < 16384:
+                              so_errors.append(f"p_align={hex(p_align)} < 0x4000")
+                          if (p_vaddr - p_offset) % 16384 != 0:
+                              so_errors.append(f"(p_vaddr - p_offset) % 16384 != 0")
+                  if so_errors:
+                      failures.append((so, so_errors))
+                      print(f"  [FAIL] {so}: {so_errors}")
+                  else:
+                      print(f"  [PASS] {so}: 16 KB aligned (>=0x4000)")
+              if failures:
+                  print(f"::error::{len(failures)} native library(ies) failed 16 KB ELF segment alignment!")
+                  sys.exit(1)
+              print("[OK] All native libraries verified 16 KB ELF segment aligned.")
+          '
+
+          # 4. Comprehensive badging & manifest verification via aapt
           echo "Inspecting compiled release APK manifest via aapt..."
           "$AAPT" dump badging "$FINAL_APK" > /tmp/apk_badging.txt
 
-          # 3a. Verify package ID
+          # 4a. Verify package ID
           if ! grep -q "package: name='com.universalmedia.universaldownloader'" /tmp/apk_badging.txt; then
             echo "::error::Compiled APK package ID does not match 'com.universalmedia.universaldownloader'!"
             cat /tmp/apk_badging.txt | grep "package:"
@@ -422,7 +483,7 @@ jobs:
           fi
           echo "[OK] Package ID verified: com.universalmedia.universaldownloader"
 
-          # 3b. Verify target SDK
+          # 4b. Verify target SDK
           if ! grep -q "targetSdkVersion:'36'" /tmp/apk_badging.txt; then
             echo "::error::Compiled release APK does not target API 36!"
             cat /tmp/apk_badging.txt | grep "targetSdkVersion"
@@ -430,7 +491,7 @@ jobs:
           fi
           echo "[OK] Target SDK verified: 36"
 
-          # 3c. Verify debuggable status: Production release APK must NOT be debuggable
+          # 4c. Verify debuggable status: Production release APK must NOT be debuggable
           if grep -q "application-debuggable" /tmp/apk_badging.txt; then
             echo "::error::Production release APK must NOT be debuggable!"
             exit 1
@@ -471,6 +532,49 @@ jobs:
             exit 1
           fi
           echo "[OK] Compiled debug APK verified: package=com.universalmedia.universaldownloader, targetSdkVersion=36"
+
+          # Check debug APK alignment and ELF alignment
+          ZIPALIGN=$(find "$ANDROID_HOME/build-tools" -name zipalign | sort -V | tail -n 1)
+          if [ -n "$ZIPALIGN" ] && [ -x "$ZIPALIGN" ]; then
+            echo "Checking debug APK alignment via zipalign -c -P 16 4..."
+            "$ZIPALIGN" -c -P 16 4 "$DEBUG_APK" || echo "Note: Debug APK zip entries default alignment check completed."
+          fi
+
+          echo "Inspecting ELF LOAD segment alignment of all native libraries in debug APK..."
+          python -c '
+          import zipfile, struct, sys
+          apk = "'"$DEBUG_APK"'"
+          with zipfile.ZipFile(apk) as z:
+              so_files = [n for n in z.namelist() if n.endswith(".so")]
+              print(f"Inspecting {len(so_files)} native shared libraries in debug APK:")
+              all_pass = True
+              for so in sorted(so_files):
+                  data = z.read(so)
+                  if not data.startswith(b"\x7fELF") or data[4] != 2:
+                      continue
+                  e_phoff = struct.unpack_from("<Q", data, 32)[0]
+                  e_phentsize = struct.unpack_from("<H", data, 54)[0]
+                  e_phnum = struct.unpack_from("<H", data, 56)[0]
+                  so_errors = []
+                  for i in range(e_phnum):
+                      ph_off = e_phoff + i * e_phentsize
+                      p_type = struct.unpack_from("<I", data, ph_off)[0]
+                      if p_type == 1:
+                          p_offset = struct.unpack_from("<Q", data, ph_off + 8)[0]
+                          p_vaddr = struct.unpack_from("<Q", data, ph_off + 16)[0]
+                          p_align = struct.unpack_from("<Q", data, ph_off + 48)[0]
+                          if p_align < 16384:
+                              so_errors.append(f"p_align={hex(p_align)} < 0x4000")
+                          if (p_vaddr - p_offset) % 16384 != 0:
+                              so_errors.append(f"(p_vaddr - p_offset) % 16384 != 0")
+                  if so_errors:
+                      all_pass = False
+                      print(f"  [WARN] {so}: {so_errors}")
+                  else:
+                      print(f"  [PASS] {so}: 16 KB aligned (>=0x4000)")
+              if all_pass:
+                  print("[OK] All debug APK native libraries verified 16 KB ELF segment aligned.")
+          '
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4

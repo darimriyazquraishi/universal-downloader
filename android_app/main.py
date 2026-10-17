@@ -32,7 +32,10 @@ Config.set('kivy', 'scroll_timeout', '180')
 import kivy
 # Ensure Kivy's ProcessingStream never breaks yt-dlp logger and error reporting
 try:
-    from kivy.logger import ProcessingStream
+    from kivy.logger import Logger, ProcessingStream
+except Exception:
+    import logging
+    Logger = logging.getLogger("UniversalDownloader")
     class _BufferProxy:
         def __init__(self, ps):
             self.ps = ps
@@ -114,6 +117,7 @@ try:
     IS_ANDROID = True
 except Exception:
     IS_ANDROID = False
+    autoclass = None
 
 # Luxury Gold Theme Palette (Zero Red)
 COLOR_BG = [0.055, 0.055, 0.075, 1.0]        # Deep Obsidian #0E0E13
@@ -1207,6 +1211,32 @@ class ManagerScreen(Screen):
         except Exception:
             pass
 
+    def _launch_view_intent(self, target_uri, mime="*/*"):
+        try:
+            if not IS_ANDROID:
+                return
+            PythonActivity = autoclass('org.kivy.android.PythonActivity')
+            currentActivity = PythonActivity.mActivity
+            Intent = autoclass('android.content.Intent')
+
+            try:
+                resolved_mime = currentActivity.getContentResolver().getType(target_uri)
+                if resolved_mime:
+                    mime = resolved_mime
+            except Exception:
+                pass
+
+            intent = Intent(Intent.ACTION_VIEW)
+            intent.setDataAndType(target_uri, mime)
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+
+            chooser = Intent.createChooser(intent, "Play media with...")
+            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            currentActivity.startActivity(chooser)
+        except Exception as e:
+            Logger.error(f"UniversalDownloader: Failed to start view intent for '{target_uri}': {e}")
+
     def open_file(self, path):
         try:
             if not path:
@@ -1214,73 +1244,117 @@ class ManagerScreen(Screen):
             if IS_ANDROID:
                 try:
                     is_content = engine.is_content_uri(path)
-                    if not is_content:
-                        if not os.path.exists(path):
-                            return
+                    if not is_content and not os.path.exists(path):
+                        return
 
                     PythonActivity = autoclass('org.kivy.android.PythonActivity')
                     currentActivity = PythonActivity.mActivity
-                    Intent = autoclass('android.content.Intent')
                     Uri = autoclass('android.net.Uri')
-                    
+
                     is_video = str(path).lower().endswith(('.mp4', '.mkv', '.webm', '.avi', '.mov')) or "video" in str(path).lower()
                     is_audio = str(path).lower().endswith(('.mp3', '.m4a', '.wav', '.opus', '.aac', '.flac')) or "audio" in str(path).lower()
                     mime = "video/*" if is_video else ("audio/*" if is_audio else "*/*")
 
-                    target_uri = None
-
                     # Case 1: Already an Android content URI (MediaStore item or SAF document URI)
                     if is_content:
                         target_uri = Uri.parse(str(path))
+                        self._launch_view_intent(target_uri, mime)
+                        return
+
+                    # Case 2: Filesystem path - resolve content URI via MediaStore
+                    # Avoid relying exclusively on querying the deprecated _data column.
+                    # Query by DISPLAY_NAME across MediaStore collections first.
+                    resolver = currentActivity.getContentResolver()
+                    MediaStore = autoclass('android.provider.MediaStore')
+                    ContentUris = autoclass('android.content.ContentUris')
+
+                    filename = os.path.basename(path)
+                    target_uri = None
+                    tables = []
+                    if is_video:
+                        tables.append(MediaStore.Video.Media.EXTERNAL_CONTENT_URI)
+                    elif is_audio:
+                        tables.append(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI)
+                    try:
+                        tables.append(MediaStore.Downloads.EXTERNAL_CONTENT_URI)
+                    except Exception:
+                        pass
+                    tables.append(MediaStore.Files.getContentUri("external"))
+
+                    # Query by DISPLAY_NAME
+                    for table in tables:
                         try:
-                            resolved_mime = currentActivity.getContentResolver().getType(target_uri)
-                            if resolved_mime:
-                                mime = resolved_mime
-                        except Exception:
-                            pass
-                    else:
-                        # Case 2: Filesystem path - resolve content URI via MediaStore
-                        # Security Rule: Never construct file:// intents for external apps or use permissive StrictMode
-                        try:
-                            MediaStore = autoclass('android.provider.MediaStore')
-                            ContentUris = autoclass('android.content.ContentUris')
-                            table = MediaStore.Video.Media.EXTERNAL_CONTENT_URI if is_video else (
-                                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI if is_audio else MediaStore.Files.getContentUri("external")
-                            )
-                            cursor = currentActivity.getContentResolver().query(
+                            cursor = resolver.query(
                                 table,
                                 ["_id"],
-                                "_data = ?",
-                                [path],
-                                None
+                                f"{MediaStore.MediaColumns.DISPLAY_NAME} = ?",
+                                [filename],
+                                f"{MediaStore.MediaColumns.DATE_ADDED} DESC"
                             )
                             if cursor and cursor.moveToFirst():
                                 media_id = cursor.getLong(0)
                                 target_uri = ContentUris.withAppendedId(table, media_id)
                                 cursor.close()
+                                break
+                            if cursor:
+                                cursor.close()
                         except Exception:
                             pass
 
-                        # If not yet indexed in MediaStore, trigger a media scan to index it
-                        if not target_uri:
+                    # Fallback query using deprecated _data column for legacy indexed paths
+                    if not target_uri:
+                        for table in tables:
                             try:
-                                MediaScannerConnection = autoclass('android.media.MediaScannerConnection')
-                                MediaScannerConnection.scanFile(currentActivity, [path], [mime], None)
+                                cursor = resolver.query(
+                                    table,
+                                    ["_id"],
+                                    "_data = ?",
+                                    [path],
+                                    None
+                                )
+                                if cursor and cursor.moveToFirst():
+                                    media_id = cursor.getLong(0)
+                                    target_uri = ContentUris.withAppendedId(table, media_id)
+                                    cursor.close()
+                                    break
+                                if cursor:
+                                    cursor.close()
                             except Exception:
                                 pass
 
-                    if not target_uri:
-                        Logger.warning(f"UniversalDownloader: Content URI could not be resolved for '{path}'.")
+                    if target_uri:
+                        self._launch_view_intent(target_uri, mime)
                         return
 
-                    intent = Intent(Intent.ACTION_VIEW)
-                    intent.setDataAndType(target_uri, mime)
-                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    
-                    chooser = Intent.createChooser(intent, "Play media with...")
-                    chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    currentActivity.startActivity(chooser)
+                    # Case 3: Filesystem path not yet indexed in MediaStore
+                    # Trigger MediaScannerConnection with an OnScanCompletedListener callback
+                    # so the resulting content URI is immediately opened upon scan completion.
+                    try:
+                        MediaScannerConnection = autoclass('android.media.MediaScannerConnection')
+                        from jnius import PythonJavaClass, java_method
+
+                        class ScanCompletedListener(PythonJavaClass):
+                            __javacontext__ = 'app'
+                            __javainterfaces__ = ['android/media/MediaScannerConnection$OnScanCompletedListener']
+
+                            def __init__(self, app_ref, file_mime):
+                                super().__init__()
+                                self.app_ref = app_ref
+                                self.file_mime = file_mime
+
+                            @java_method('(Ljava/lang/String;Landroid/net/Uri;)V')
+                            def onScanCompleted(self, scanned_path, scanned_uri):
+                                if scanned_uri and self.app_ref:
+                                    from kivy.clock import Clock
+                                    Clock.schedule_once(
+                                        lambda dt: self.app_ref._launch_view_intent(scanned_uri, self.file_mime),
+                                        0
+                                    )
+
+                        listener = ScanCompletedListener(self, mime)
+                        MediaScannerConnection.scanFile(currentActivity, [path], [mime], listener)
+                    except Exception as scan_err:
+                        Logger.error(f"UniversalDownloader: MediaScanner scanFile failed for '{path}': {scan_err}")
                 except Exception as e:
                     Logger.error(f"UniversalDownloader: Failed to open file: {e}")
             else:
@@ -1300,17 +1374,25 @@ class ManagerScreen(Screen):
             cfg = engine.load_settings()
             default_dir = cfg.get("download_dir", engine.get_default_download_dir())
 
-            # 1. Resolve target folder from path or settings
-            folder = None
+            # 1. Determine folder target and whether custom SAF tree is requested
+            is_custom_tree = False
+            target_tree_uri = None
+            is_downloads = False
+
             if path:
                 if engine.is_tree_uri(path):
-                    folder = str(path)
+                    is_custom_tree = True
+                    target_tree_uri = str(path)
                 elif engine.is_document_uri(path):
-                    # For completed downloads stored through SAF, extract containing tree URI
                     parent_tree = engine.extract_parent_tree_uri(path)
-                    folder = parent_tree if parent_tree else default_dir
+                    if parent_tree:
+                        is_custom_tree = True
+                        target_tree_uri = parent_tree
+                    else:
+                        Logger.warning(f"UniversalDownloader: Document URI '{path}' lacks a navigable parent tree URI.")
+                        return False
                 elif engine.is_mediastore_uri(path):
-                    folder = "content://media/external/downloads"
+                    is_downloads = True
                 elif not engine.is_content_uri(path):
                     if os.path.isfile(path):
                         folder = os.path.dirname(path)
@@ -1318,9 +1400,17 @@ class ManagerScreen(Screen):
                         folder = path
                     else:
                         folder = default_dir
-
-            if not folder:
-                folder = default_dir
+                    if engine.is_tree_uri(folder):
+                        is_custom_tree = True
+                        target_tree_uri = folder
+                    else:
+                        is_downloads = (folder == "downloads" or folder == engine.get_default_download_dir())
+            else:
+                if engine.is_tree_uri(default_dir):
+                    is_custom_tree = True
+                    target_tree_uri = default_dir
+                else:
+                    is_downloads = True
 
             if IS_ANDROID:
                 try:
@@ -1328,48 +1418,100 @@ class ManagerScreen(Screen):
                     currentActivity = PythonActivity.mActivity
                     Intent = autoclass('android.content.Intent')
                     Uri = autoclass('android.net.Uri')
-                    DownloadManager = autoclass('android.app.DownloadManager')
 
-                    # Case 1: SAF Tree URI (user-selected folder or parent folder of completed SAF download)
-                    if engine.is_tree_uri(folder):
+                    # Case 1: SAF Tree URI (user-selected custom folder or parent of SAF download)
+                    if is_custom_tree and target_tree_uri:
+                        # Verify permissions are still granted for this tree URI
+                        try:
+                            persisted_perms = currentActivity.getContentResolver().getPersistedUriPermissions()
+                            has_perm = False
+                            for perm in persisted_perms:
+                                p_uri = str(perm.getUri().toString())
+                                if p_uri in target_tree_uri or target_tree_uri.startswith(p_uri):
+                                    if perm.isReadPermission():
+                                        has_perm = True
+                                        break
+                            if persisted_perms is not None and not has_perm:
+                                Logger.error(f"UniversalDownloader: Cannot open custom folder. Storage Access Framework permission has been revoked for '{target_tree_uri}'.")
+                                # Do NOT fall back to Downloads! Report clear error to prevent false implication.
+                                return False
+                        except Exception as e:
+                            Logger.debug(f"UniversalDownloader: Permission check skipped or failed: {e}")
+
+                        # Attempt to launch file manager / Documents app viewing the custom tree folder
+                        opened = False
                         try:
                             DocumentsContract = autoclass('android.provider.DocumentsContract')
-                            tree_uri = Uri.parse(str(folder))
+                            tree_uri = Uri.parse(str(target_tree_uri))
                             doc_id = DocumentsContract.getTreeDocumentId(tree_uri)
                             folder_doc_uri = DocumentsContract.buildDocumentUriUsingTree(tree_uri, doc_id)
+
                             intent = Intent(Intent.ACTION_VIEW)
                             intent.setDataAndType(folder_doc_uri, "vnd.android.document/directory")
                             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                             intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            intent.addFlags(Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)
                             currentActivity.startActivity(intent)
-                            return
-                        except Exception:
-                            pass
+                            opened = True
+                        except Exception as e1:
+                            Logger.warning(f"UniversalDownloader: Primary ACTION_VIEW directory intent failed: {e1}")
+                            # Fallback attempt 1: Intent with EXTRA_INITIAL_URI
+                            try:
+                                DocumentsContract = autoclass('android.provider.DocumentsContract')
+                                tree_uri = Uri.parse(str(target_tree_uri))
+                                intent = Intent(Intent.ACTION_VIEW)
+                                intent.setData(tree_uri)
+                                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                currentActivity.startActivity(intent)
+                                opened = True
+                            except Exception as e2:
+                                Logger.warning(f"UniversalDownloader: Fallback tree view intent failed: {e2}")
+
+                        if not opened:
+                            Logger.error(f"UniversalDownloader: Failed to open custom SAF folder '{target_tree_uri}'. No compatible file manager found.")
+                            # CRITICAL: Preserve requested destination; DO NOT SILENTLY OPEN DOWNLOADS!
+                            return False
+                        return True
 
                     # Case 2: MediaStore or standard public downloads folder
-                    try:
-                        intent = Intent(DownloadManager.ACTION_VIEW_DOWNLOADS)
-                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        currentActivity.startActivity(intent)
-                        return
-                    except Exception:
-                        pass
+                    if is_downloads:
+                        try:
+                            DownloadManager = autoclass('android.app.DownloadManager')
+                            intent = Intent(DownloadManager.ACTION_VIEW_DOWNLOADS)
+                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            currentActivity.startActivity(intent)
+                            return True
+                        except Exception as e:
+                            Logger.error(f"UniversalDownloader: Failed to open system Downloads view: {e}")
+                            return False
+
+                    # Case 3: Other local filesystem directory
+                    if path and os.path.isdir(path):
+                        Logger.info(f"UniversalDownloader: Target directory is filesystem path: {path}")
+                        return True
+                    else:
+                        Logger.error(f"UniversalDownloader: Destination '{path}' is not a valid folder.")
+                        return False
                 except Exception as e:
                     Logger.error(f"UniversalDownloader: Failed to open folder: {e}")
+                    return False
             else:
-                if not os.path.exists(folder):
+                target_folder = target_tree_uri if (is_custom_tree and target_tree_uri) else (path if path and os.path.isdir(path) else default_dir)
+                if not os.path.exists(target_folder):
                     try:
-                        os.makedirs(folder, exist_ok=True)
+                        os.makedirs(target_folder, exist_ok=True)
                     except Exception:
                         pass
                 if sys.platform == "win32":
-                    os.startfile(folder)
+                    os.startfile(target_folder)
                 elif sys.platform == "darwin":
-                    subprocess.run(["open", folder])
+                    subprocess.run(["open", target_folder])
                 else:
-                    subprocess.run(["xdg-open", folder])
-        except Exception:
-            pass
+                    subprocess.run(["xdg-open", target_folder])
+                return True
+        except Exception as e:
+            Logger.error(f"UniversalDownloader: open_folder error: {e}")
+            return False
 
     def clear_all(self, *args):
         engine.clear_history()

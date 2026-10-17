@@ -16,6 +16,43 @@ REPO_ROOT = os.path.abspath(os.path.join(CURRENT_DIR, ".."))
 if not os.path.exists(os.path.join(REPO_ROOT, "downloader_engine.py")):
     raise RuntimeError(f"Could not locate downloader_engine.py at repository root {REPO_ROOT}")
 
+# Provide headless import fallback for Kivy and PyJNIus when running on environments without display/GUI wheels
+if "kivy" not in sys.modules:
+    try:
+        import kivy
+    except ImportError:
+        from importlib.machinery import ModuleSpec
+
+        class DummyMeta(type):
+            def __getattr__(cls, name):
+                return lambda *args, **kwargs: DummyMeta(name, (object,), {})()
+
+        def make_dummy(name):
+            return DummyMeta(name, (object,), {
+                "__init__": lambda self, *a, **k: None,
+                "__call__": lambda self, *a, **k: self,
+                "__getattr__": lambda self, n: lambda *a, **k: None
+            })
+
+        class MockLoader:
+            def create_module(self, spec):
+                import types
+                mod = types.ModuleType(spec.name)
+                mod.__path__ = []
+                mod.__file__ = spec.name
+                mod.__getattr__ = lambda name: make_dummy(name)
+                return mod
+            def exec_module(self, module):
+                pass
+
+        class MockFinder:
+            def find_spec(self, fullname, path=None, target=None):
+                if any(fullname.startswith(p) for p in ["kivy", "jnius", "android"]):
+                    return ModuleSpec(fullname, MockLoader(), origin=fullname)
+                return None
+
+        sys.meta_path.insert(0, MockFinder())
+
 sys.path.insert(0, REPO_ROOT)
 import downloader_engine as engine
 
@@ -320,7 +357,7 @@ class TestBuildozerAndWorkflowPaths(unittest.TestCase):
         # Verify test job runs regression tests before building APK
         self.assertIn("test:", wf)
         self.assertIn("needs: test", wf)
-        self.assertIn("python -m unittest discover", wf)
+        self.assertTrue("unittest" in wf and "discover" in wf, "Workflow must discover and run tests via unittest")
 
         # Verify API 36 SDK component setup
         self.assertIn("platforms;android-36", wf, "Workflow must install platforms;android-36 SDK component")
@@ -384,8 +421,8 @@ class TestBuildozerAndWorkflowPaths(unittest.TestCase):
         self.assertIn("Required inspection tool 'zipalign' not found", wf)
         self.assertIn("Required inspection tool 'aapt' not found", wf)
 
-        # 2. 4-byte page alignment verification
-        self.assertIn("$ZIPALIGN\" -c -v 4", wf)
+        # 2. Page alignment verification (accepts modern 16 KB alignment verification -P 16 4)
+        self.assertTrue(any(p in wf for p in ['$ZIPALIGN" -c -P 16 4', '$ZIPALIGN" -c -v 4', '"$ZIPALIGN" -c -P 16 4']), "Workflow must verify zipalign alignment")
 
         # 3. Target API 36, package ID, and non-debuggable verification
         self.assertIn("targetSdkVersion:'36'", wf)
@@ -677,12 +714,298 @@ class TestStorageDestinationAndUriHandling(unittest.TestCase):
             self.assertTrue(os.path.exists(final_path))
             self.assertEqual(os.path.basename(final_path), "test_track.mp4")
             self.assertFalse(os.path.exists(staging_file), "Staging file should be moved/cleaned up")
-
-
-
 # ===========================================================================
-# Optional Integration Tests (Live Network - Skipped by default in offline CI)
+# Area 8: Custom Folder Opening, File Opening Security, and 16 KB ELF Alignment
 # ===========================================================================
+class TestArea8FolderAndFileOpeningAnd16KbAlignment(unittest.TestCase):
+    """Verify custom folder navigation, file opening security, and 16 KB ELF validation."""
+
+    def test_open_folder_saf_failure_does_not_open_downloads(self):
+        """
+        Verify that when opening a custom SAF tree directory fails (e.g. revoked permission
+        or missing activity), open_folder() reports an error and NEVER silently falls back
+        to opening the public Downloads screen.
+        """
+        import main as app_module
+        screen = app_module.ManagerScreen.__new__(app_module.ManagerScreen)
+        screen.items_data = {}
+
+        mock_activity = MagicMock()
+        mock_resolver = MagicMock()
+        mock_resolver.getPersistedUriPermissions.return_value = []
+        mock_activity.mActivity.getContentResolver.return_value = mock_resolver
+
+        mock_download_manager = MagicMock()
+        mock_download_manager.ACTION_VIEW_DOWNLOADS = "android.intent.action.VIEW_DOWNLOADS"
+
+        def mock_autoclass(cls_name):
+            if cls_name == "org.kivy.android.PythonActivity":
+                return mock_activity
+            if cls_name == "android.app.DownloadManager":
+                return mock_download_manager
+            if cls_name == "android.net.Uri":
+                mock_uri = MagicMock()
+                mock_uri.parse.return_value = MagicMock()
+                return mock_uri
+            if cls_name == "android.content.Intent":
+                return MagicMock()
+            return MagicMock()
+
+        with patch.object(app_module, "IS_ANDROID", True):
+            with patch.object(app_module, "autoclass", mock_autoclass):
+                saf_tree = "content://com.android.externalstorage.documents/tree/primary%3AMusic"
+                result = screen.open_folder(saf_tree)
+                self.assertFalse(result, "open_folder must return False on SAF permission failure")
+                mock_activity.mActivity.startActivity.assert_not_called()
+
+    def test_open_folder_nested_document_uri_targets_parent_tree(self):
+        """
+        Verify that when open_folder is called with a document URI inside a tree,
+        it resolves the parent tree root and attempts to open that tree instead of Downloads.
+        """
+        import main as app_module
+        screen = app_module.ManagerScreen.__new__(app_module.ManagerScreen)
+        screen.items_data = {}
+
+        mock_activity = MagicMock()
+        mock_resolver = MagicMock()
+        mock_perm = MagicMock()
+        mock_perm.getUri.return_value.toString.return_value = "content://com.android.externalstorage.documents/tree/primary%3AMusic"
+        mock_perm.isReadPermission.return_value = True
+        mock_resolver.getPersistedUriPermissions.return_value = [mock_perm]
+        mock_activity.mActivity.getContentResolver.return_value = mock_resolver
+
+        mock_download_manager = MagicMock()
+        mock_download_manager.ACTION_VIEW_DOWNLOADS = "android.intent.action.VIEW_DOWNLOADS"
+        doc_contract_called = []
+
+        def mock_autoclass(cls_name):
+            if cls_name == "org.kivy.android.PythonActivity":
+                return mock_activity
+            if cls_name == "android.app.DownloadManager":
+                return mock_download_manager
+            if cls_name == "android.provider.DocumentsContract":
+                mock_dc = MagicMock()
+                mock_dc.getTreeDocumentId.return_value = "primary:Music"
+                mock_dc.buildDocumentUriUsingTree.return_value = "content://doc/dir"
+                doc_contract_called.append(True)
+                return mock_dc
+            if cls_name == "android.net.Uri":
+                mock_uri = MagicMock()
+                mock_uri.parse.return_value = MagicMock()
+                return mock_uri
+            if cls_name == "android.content.Intent":
+                return MagicMock()
+            return MagicMock()
+
+        with patch.object(app_module, "IS_ANDROID", True):
+            with patch.object(app_module, "autoclass", mock_autoclass):
+                nested_doc = "content://com.android.externalstorage.documents/tree/primary%3AMusic/document/primary%3AMusic%2Fsong.mp3"
+                result = screen.open_folder(nested_doc)
+                self.assertTrue(result)
+                self.assertTrue(len(doc_contract_called) > 0, "DocumentsContract must be used for parent tree opening")
+                mock_activity.mActivity.startActivity.assert_called_once()
+
+    def test_open_folder_mediastore_and_default_uses_downloads(self):
+        """
+        Verify that when open_folder is called for MediaStore item or default Downloads,
+        the system Downloads action is used.
+        """
+        import main as app_module
+        screen = app_module.ManagerScreen.__new__(app_module.ManagerScreen)
+        screen.items_data = {}
+
+        mock_activity = MagicMock()
+        mock_download_manager = MagicMock()
+        mock_download_manager.ACTION_VIEW_DOWNLOADS = "android.intent.action.VIEW_DOWNLOADS"
+
+        def mock_autoclass(cls_name):
+            if cls_name == "org.kivy.android.PythonActivity":
+                return mock_activity
+            if cls_name == "android.app.DownloadManager":
+                return mock_download_manager
+            return MagicMock()
+
+        with patch.object(app_module, "IS_ANDROID", True):
+            with patch.object(app_module, "autoclass", mock_autoclass):
+                ms_uri = "content://media/external/downloads/100"
+                result = screen.open_folder(ms_uri)
+                self.assertTrue(result)
+                mock_activity.mActivity.startActivity.assert_called_once()
+
+    def test_open_file_content_uri_launches_read_permission_intent(self):
+        """
+        Verify that opening a content:// URI (new download or from history)
+        launches an ACTION_VIEW intent with FLAG_GRANT_READ_URI_PERMISSION.
+        """
+        import main as app_module
+        screen = app_module.ManagerScreen.__new__(app_module.ManagerScreen)
+        screen.items_data = {}
+
+        mock_activity = MagicMock()
+        mock_intent_class = MagicMock()
+        mock_intent = MagicMock()
+        mock_intent_class.return_value = mock_intent
+        mock_intent_class.FLAG_GRANT_READ_URI_PERMISSION = 1
+        mock_intent_class.FLAG_ACTIVITY_NEW_TASK = 268435456
+        mock_intent_class.createChooser.return_value = MagicMock()
+
+        def mock_autoclass(cls_name):
+            if cls_name == "org.kivy.android.PythonActivity":
+                return mock_activity
+            if cls_name == "android.content.Intent":
+                return mock_intent_class
+            if cls_name == "android.net.Uri":
+                mock_uri = MagicMock()
+                mock_uri.parse.return_value = MagicMock()
+                return mock_uri
+            return MagicMock()
+
+        with patch.object(app_module, "IS_ANDROID", True):
+            with patch.object(app_module, "autoclass", mock_autoclass):
+                screen.open_file("content://media/external/downloads/42")
+                mock_intent.addFlags.assert_any_call(mock_intent_class.FLAG_GRANT_READ_URI_PERMISSION)
+                mock_activity.mActivity.startActivity.assert_called_once()
+
+    def test_open_file_unindexed_filesystem_path_wires_scanner_callback(self):
+        """
+        Verify that when open_file is called on an unindexed filesystem path,
+        it does not return immediately without a callback, but wires an
+        OnScanCompletedListener to MediaScannerConnection.
+        """
+        import main as app_module
+        screen = app_module.ManagerScreen.__new__(app_module.ManagerScreen)
+        screen.items_data = {}
+
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f:
+            f.write(b"video bytes")
+            tmp_path = f.name
+
+        try:
+            mock_activity = MagicMock()
+            mock_resolver = MagicMock()
+            mock_resolver.query.return_value = None
+            mock_activity.mActivity.getContentResolver.return_value = mock_resolver
+
+            mock_scanner = MagicMock()
+            mock_intent_class = MagicMock()
+
+            def mock_autoclass(cls_name):
+                if cls_name == "org.kivy.android.PythonActivity":
+                    return mock_activity
+                if cls_name == "android.media.MediaScannerConnection":
+                    return mock_scanner
+                if cls_name == "android.provider.MediaStore":
+                    m = MagicMock()
+                    m.MediaColumns.DISPLAY_NAME = "_display_name"
+                    m.MediaColumns.DATE_ADDED = "date_added"
+                    return m
+                if cls_name == "android.content.ContentUris":
+                    return MagicMock()
+                if cls_name == "android.content.Intent":
+                    return mock_intent_class
+                if cls_name == "android.net.Uri":
+                    return MagicMock()
+                return MagicMock()
+
+            with patch.object(app_module, "IS_ANDROID", True):
+                with patch.object(app_module, "autoclass", mock_autoclass):
+                    screen.open_file(tmp_path)
+                    mock_scanner.scanFile.assert_called_once()
+                    call_args = mock_scanner.scanFile.call_args[0]
+                    self.assertEqual(len(call_args), 4)
+                    self.assertEqual(call_args[1], [tmp_path])
+                    self.assertIsNotNone(call_args[3], "Listener must NOT be None: callback required to open resulting URI")
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+    def test_no_permissive_strictmode_or_file_uri_exposure(self):
+        """Verify no StrictMode workarounds or Uri.fromFile intents exist in source."""
+        for fname in ["main.py", "downloader_engine.py"]:
+            fpath = os.path.join(REPO_ROOT, fname)
+            with open(fpath, "r", encoding="utf-8") as f:
+                code = f.read()
+                self.assertNotIn("detectFileUriExposure", code, f"Insecure StrictMode workaround in {fname}")
+                self.assertNotIn("Uri.fromFile", code, f"Insecure Uri.fromFile usage in {fname}")
+        with open(os.path.join(REPO_ROOT, "main.py"), "r", encoding="utf-8") as f:
+            code = f.read()
+            self.assertNotIn("file://", code.replace("file:///", ""), "Unsafe file:// scheme usage in main.py")
+
+    def test_elf_16kb_page_alignment_detection(self):
+        """
+        Verify the 16 KB ELF segment validator correctly detects 4 KB vs 16 KB alignment.
+        """
+        import struct
+
+        def create_mock_elf64(p_align, p_offset, p_vaddr):
+            # 64-byte ELF header
+            elf_hdr = bytearray(64)
+            elf_hdr[0:4] = b"\x7fELF"
+            elf_hdr[4] = 2 # ELFCLASS64
+            elf_hdr[5] = 1 # ELFDATA2LSB
+            struct.pack_into("<Q", elf_hdr, 32, 64) # e_phoff = 64
+            struct.pack_into("<H", elf_hdr, 54, 56) # e_phentsize = 56
+            struct.pack_into("<H", elf_hdr, 56, 1)  # e_phnum = 1
+
+            # 56-byte Program Header (PT_LOAD = 1)
+            ph = bytearray(56)
+            struct.pack_into("<I", ph, 0, 1)        # p_type = 1 (PT_LOAD)
+            struct.pack_into("<Q", ph, 8, p_offset) # p_offset
+            struct.pack_into("<Q", ph, 16, p_vaddr) # p_vaddr
+            struct.pack_into("<Q", ph, 48, p_align) # p_align
+            return bytes(elf_hdr + ph)
+
+        def is_16kb(data):
+            e_phoff = struct.unpack_from("<Q", data, 32)[0]
+            e_phentsize = struct.unpack_from("<H", data, 54)[0]
+            e_phnum = struct.unpack_from("<H", data, 56)[0]
+            for i in range(e_phnum):
+                off = e_phoff + i * e_phentsize
+                p_type = struct.unpack_from("<I", data, off)[0]
+                if p_type == 1:
+                    p_offset = struct.unpack_from("<Q", data, off + 8)[0]
+                    p_vaddr = struct.unpack_from("<Q", data, off + 16)[0]
+                    p_align = struct.unpack_from("<Q", data, off + 48)[0]
+                    if p_align < 16384 or (p_vaddr - p_offset) % 16384 != 0:
+                        return False
+            return True
+
+        # 4 KB aligned segment: should FAIL 16 KB validation
+        elf_4kb = create_mock_elf64(p_align=4096, p_offset=0, p_vaddr=0)
+        self.assertFalse(is_16kb(elf_4kb))
+
+        # Misaligned (vaddr - offset) % 16384 != 0: should FAIL 16 KB validation
+        elf_misaligned = create_mock_elf64(p_align=16384, p_offset=0x1000, p_vaddr=0x2000) # (0x2000 - 0x1000) % 16384 != 0
+        self.assertFalse(is_16kb(elf_misaligned))
+
+        # 16 KB aligned segment: should PASS 16 KB validation
+        elf_16kb = create_mock_elf64(p_align=16384, p_offset=0x4000, p_vaddr=0x8000) # (0x8000 - 0x4000) % 16384 == 0
+        self.assertTrue(is_16kb(elf_16kb))
+
+        # 64 KB aligned segment: should PASS 16 KB validation
+        elf_64kb = create_mock_elf64(p_align=65536, p_offset=0, p_vaddr=0)
+        self.assertTrue(is_16kb(elf_64kb))
+
+    def test_ci_workflow_runs_test_suite_once_and_fails_on_nonzero(self):
+        """
+        Verify that .github/workflows/build_apk.yml executes tests once,
+        records dynamic outputs, and exits with nonzero status on failure.
+        """
+        wf_path = os.path.join(REPO_ROOT, ".github", "workflows", "build_apk.yml")
+        with open(wf_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        # Must not run unittest discover twice
+        self.assertNotIn("python -m unittest discover", content, "Redundant second test execution found in workflow")
+        # Must execute single test runner with verbosity and exit 1 on failure
+        self.assertIn("sys.exit(1)", content, "Workflow test runner must exit 1 on test failure")
+        self.assertIn("tests_passed=", content)
+        self.assertIn("tests_failed=", content)
+        self.assertIn("tests_skipped=", content)
+
+
+
 class TestLiveNetworkIntegration(unittest.TestCase):
     """Optional live network integration tests. Enable with RUN_NETWORK_TESTS=1."""
 

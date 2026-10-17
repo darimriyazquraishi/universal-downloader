@@ -60,8 +60,8 @@ android.minapi = 21
 # (int) Android SDK version to use
 android.sdk = 36
 
-# (str) Android NDK version to use
-android.ndk = 26b
+# (str) Android NDK version to use (NDK r28c enables 16 KB ELF segment alignment by default)
+android.ndk = 28c
 
 # (int) Android NDK API to use
 android.ndk_api = 21
