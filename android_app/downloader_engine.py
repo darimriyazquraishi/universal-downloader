@@ -123,8 +123,27 @@ def is_content_uri(path_or_uri):
         return False
     return str(path_or_uri).strip().startswith("content://")
 
-# Backward-compatible alias for existing callers
-is_saf_uri = is_content_uri
+def is_tree_uri(path_or_uri):
+    """Check if target string is an Android SAF Tree URI (directory from ACTION_OPEN_DOCUMENT_TREE)."""
+    if not is_content_uri(path_or_uri):
+        return False
+    return "/tree/" in str(path_or_uri)
+
+def is_document_uri(path_or_uri):
+    """Check if target string is an Android SAF Document URI (individual file or directory document)."""
+    if not is_content_uri(path_or_uri):
+        return False
+    return "/document/" in str(path_or_uri)
+
+def is_mediastore_uri(path_or_uri):
+    """Check if target string is an Android MediaStore collection or item URI."""
+    if not path_or_uri:
+        return False
+    return str(path_or_uri).strip().startswith("content://media/")
+
+def is_saf_uri(path_or_uri):
+    """Check if target string is specifically a Storage Access Framework URI (tree or document)."""
+    return is_tree_uri(path_or_uri) or is_document_uri(path_or_uri)
 
 def save_to_mediastore_downloads(staging_filepath, display_name, mime_type="video/mp4"):
     """
@@ -217,14 +236,19 @@ def get_staging_download_dir():
 def save_file_to_destination(staging_filepath, destination_dir_or_uri, display_name, mime_type="video/mp4"):
     """
     Export completed download from staging path into the final destination.
-    Seamlessly handles Storage Access Framework (SAF) tree URIs, MediaStore Downloads,
+    Handles Storage Access Framework (SAF) tree URIs, MediaStore Downloads,
     and standard filesystem paths.
+
+    Security and Integrity Rule:
+    Never silently redirect a failed custom destination to another folder.
+    Preserve completed staged downloads and raise errors when the selected
+    destination is unavailable.
     """
     if not os.path.exists(staging_filepath):
         raise FileNotFoundError(f"Staged download not found at {staging_filepath}")
 
     # Case 1: Android Storage Access Framework content:// tree URI (custom user-selected directory)
-    if IS_ANDROID and is_content_uri(destination_dir_or_uri):
+    if IS_ANDROID and is_tree_uri(destination_dir_or_uri):
         try:
             PythonActivity = autoclass('org.kivy.android.PythonActivity')
             activity = PythonActivity.mActivity
@@ -237,33 +261,38 @@ def save_file_to_destination(staging_filepath, destination_dir_or_uri, display_n
             parent_doc_uri = DocumentsContract.buildDocumentUriUsingTree(tree_uri, doc_id)
 
             new_doc_uri = DocumentsContract.createDocument(resolver, parent_doc_uri, mime_type, display_name)
-            if new_doc_uri:
-                out_stream = resolver.openOutputStream(new_doc_uri)
-                if out_stream:
-                    try:
-                        with open(staging_filepath, "rb") as in_f:
-                            while True:
-                                chunk = in_f.read(65536)
-                                if not chunk:
-                                    break
-                                out_stream.write(bytes(chunk))
-                        out_stream.flush()
-                    finally:
-                        try:
-                            out_stream.close()
-                        except Exception:
-                            pass
-                    try:
-                        os.remove(staging_filepath)
-                    except Exception:
-                        pass
-                    return str(new_doc_uri.toString())
-        except Exception:
-            # Fallback to MediaStore if SAF document creation fails
-            pass
+            if not new_doc_uri:
+                raise IOError(f"DocumentsContract failed to create document for '{display_name}'")
 
-    # Case 2: On Android, if destination is standard public downloads (or SAF failed), publish via MediaStore
-    if IS_ANDROID:
+            out_stream = resolver.openOutputStream(new_doc_uri)
+            if not out_stream:
+                raise IOError(f"Failed to open output stream for '{display_name}'")
+
+            try:
+                with open(staging_filepath, "rb") as in_f:
+                    while True:
+                        chunk = in_f.read(65536)
+                        if not chunk:
+                            break
+                        out_stream.write(bytes(chunk))
+                out_stream.flush()
+            finally:
+                try:
+                    out_stream.close()
+                except Exception:
+                    pass
+
+            try:
+                os.remove(staging_filepath)
+            except Exception:
+                pass
+            return str(new_doc_uri.toString())
+        except Exception as e:
+            # Preserve staging file and raise error to user: DO NOT SILENTLY REDIRECT!
+            raise IOError(f"Failed to save to selected custom folder: {e}")
+
+    # Case 2: On Android, shared / default downloads publish via MediaStore
+    if IS_ANDROID and (not destination_dir_or_uri or is_mediastore_uri(destination_dir_or_uri) or destination_dir_or_uri == get_default_download_dir()):
         try:
             mediastore_uri = save_to_mediastore_downloads(staging_filepath, display_name, mime_type)
             if mediastore_uri:
@@ -271,8 +300,8 @@ def save_file_to_destination(staging_filepath, destination_dir_or_uri, display_n
         except Exception:
             pass
 
-    # Case 3: Standard filesystem destination (desktop simulator or Android app-specific storage fallback)
-    dest_dir = destination_dir_or_uri if not is_content_uri(destination_dir_or_uri) else get_default_download_dir()
+    # Case 3: Standard filesystem destination (desktop simulator or Android app-specific storage)
+    dest_dir = destination_dir_or_uri if (destination_dir_or_uri and not is_content_uri(destination_dir_or_uri)) else get_default_download_dir()
     dest_dir = ensure_valid_download_dir(dest_dir)
     target_path = os.path.join(dest_dir, display_name)
 
@@ -325,10 +354,10 @@ def uri_to_display_name(uri_or_path):
     return s
 
 def ensure_valid_download_dir(dir_path=None):
-    """Ensure directory exists and is writable, returning a safe, verified path or SAF URI."""
+    """Ensure directory exists and is writable, returning a safe, verified path or content URI."""
     if dir_path:
-        # If already a valid Storage Access Framework URI, preserve it directly
-        if is_saf_uri(dir_path):
+        # If already a valid Storage Access Framework or MediaStore URI, preserve it directly
+        if is_content_uri(dir_path):
             return str(dir_path)
 
         # Automatic upgrade: if old settings had the locked Android/data path, migrate to public Downloads!
@@ -366,9 +395,9 @@ def ensure_valid_download_dir(dir_path=None):
 
 def uri_to_path(uri_obj):
     """
-    Convert legacy Android Storage Access Framework content/tree Uri to filesystem path where feasible,
-    with strict path traversal protection. Note: On Android 10+ (API 29-36), content:// URIs cannot and must not
-    be assumed to convert into direct POSIX filesystem paths for external storage, and are handled via ContentResolver/SAF/MediaStore.
+    Convert file:// URI or local filesystem representation to a normalized POSIX path.
+    Note: Android content:// URIs (SAF and MediaStore) cannot and must not be converted
+    to direct filesystem paths under Scoped Storage; this function explicitly rejects them.
     """
     if not uri_obj:
         return None
@@ -376,50 +405,18 @@ def uri_to_path(uri_obj):
         uri_str = uri_obj.toString() if hasattr(uri_obj, 'toString') else str(uri_obj)
         if not uri_str:
             return None
-        import urllib.parse
-        decoded = urllib.parse.unquote(uri_str)
-
-        # Primary shared external storage
-        if "primary:" in decoded:
-            rel = decoded.split("primary:")[-1].strip("/")
-            full = f"/storage/emulated/0/{rel}" if rel else "/storage/emulated/0"
-            norm = os.path.normpath(full).replace("\\", "/")
-            # Path traversal check: must stay within /storage/emulated/0
-            if norm == "/storage/emulated/0" or norm.startswith("/storage/emulated/0/"):
-                return norm
-            return "/storage/emulated/0"
-
-        # Secondary storage (e.g. micro SD cards)
-        elif "/tree/" in decoded:
-            part = decoded.split("/tree/")[-1]
-            if ":" in part:
-                storage_id, rel = part.split(":", 1)
-                storage_id = storage_id.strip("/")
-                rel = rel.strip("/")
-                if storage_id == "primary":
-                    norm = os.path.normpath(f"/storage/emulated/0/{rel}").replace("\\", "/")
-                    if norm == "/storage/emulated/0" or norm.startswith("/storage/emulated/0/"):
-                        return norm
-                    return "/storage/emulated/0"
-                else:
-                    norm = os.path.normpath(f"/storage/{storage_id}/{rel}").replace("\\", "/")
-                    if norm == f"/storage/{storage_id}" or norm.startswith(f"/storage/{storage_id}/"):
-                        return norm
-                    return f"/storage/{storage_id}"
-
-        # Standard file:// scheme
-        elif uri_str.startswith("file://"):
+        # Reject all content:// URIs - they cannot be converted to filesystem paths
+        if is_content_uri(uri_str):
+            return None
+        if uri_str.startswith("file://"):
             raw_path = uri_str[7:]
-            norm = os.path.normpath(raw_path).replace("\\", "/")
-            return norm
-
-        # Direct absolute filesystem path
-        elif os.path.isabs(uri_str) and not uri_str.startswith("content://"):
-            norm = os.path.normpath(uri_str).replace("\\", "/")
-            return norm
+            return os.path.normpath(raw_path).replace("\\", "/")
+        if os.path.isabs(uri_str):
+            return os.path.normpath(uri_str).replace("\\", "/")
     except Exception:
         pass
     return None
+
 
 def get_history_path():
     """Path to app-specific download history JSON file."""

@@ -55,6 +55,11 @@ jobs:
     runs-on: ubuntu-22.04
     permissions:
       contents: read
+    outputs:
+      tests_total: ${{ steps.run_tests.outputs.tests_total }}
+      tests_passed: ${{ steps.run_tests.outputs.tests_passed }}
+      tests_failed: ${{ steps.run_tests.outputs.tests_failed }}
+      tests_skipped: ${{ steps.run_tests.outputs.tests_skipped }}
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -70,9 +75,28 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run Test Suite
+      - name: Run Test Suite & Capture Actual Results
+        id: run_tests
         run: |
-          python -m unittest discover -s tests -p "test_*.py"
+          python -m unittest discover -s tests -p "test_*.py" -v
+          python -c '
+          import os, unittest
+          loader = unittest.TestLoader()
+          suite = loader.discover("tests", pattern="test_*.py")
+          result = unittest.TextTestRunner(stream=open(os.devnull, "w")).run(suite)
+          total = result.testsRun
+          failed = len(result.failures) + len(result.errors)
+          skipped = len(result.skipped)
+          passed = total - failed - skipped
+          print(f"Dynamic Test Summary: Total={total}, Passed={passed}, Failed={failed}, Skipped={skipped}")
+          gh_out = os.environ.get("GITHUB_OUTPUT")
+          if gh_out:
+              with open(gh_out, "a") as f:
+                  f.write(f"tests_total={total}\n")
+                  f.write(f"tests_passed={passed}\n")
+                  f.write(f"tests_failed={failed}\n")
+                  f.write(f"tests_skipped={skipped}\n")
+          '
 
   build-apk:
     name: Build Android APK
@@ -83,6 +107,7 @@ jobs:
     outputs:
       build_mode: ${{ steps.mode.outputs.build_mode }}
       artifact_name: ${{ steps.mode.outputs.artifact_name }}
+      app_version: ${{ steps.mode.outputs.app_version }}
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -105,9 +130,34 @@ jobs:
 
       - name: Install Android SDK Platform 36 & Build Tools
         run: |
-          echo "Ensuring Android SDK Platform 36 & Build Tools are installed..."
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
-          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools" || true
+          echo "Installing pinned Android SDK Platform 36 and Build Tools 36.0.0..."
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+
+      - name: Verify Android SDK Components
+        run: |
+          echo "Verifying mandatory Android SDK components are present..."
+          if [ ! -d "$ANDROID_HOME/platforms/android-36" ]; then
+            echo "::error::Mandatory Android SDK Platform 36 component missing in $ANDROID_HOME/platforms/android-36!"
+            exit 1
+          fi
+          if [ ! -d "$ANDROID_HOME/build-tools/36.0.0" ]; then
+            echo "::error::Mandatory Android Build Tools 36.0.0 component missing in $ANDROID_HOME/build-tools/36.0.0!"
+            exit 1
+          fi
+          if [ ! -x "$ANDROID_HOME/build-tools/36.0.0/apksigner" ]; then
+            echo "::error::apksigner not found in $ANDROID_HOME/build-tools/36.0.0!"
+            exit 1
+          fi
+          if [ ! -x "$ANDROID_HOME/build-tools/36.0.0/zipalign" ]; then
+            echo "::error::zipalign not found in $ANDROID_HOME/build-tools/36.0.0!"
+            exit 1
+          fi
+          if [ ! -d "$ANDROID_HOME/platform-tools" ]; then
+            echo "::error::Android platform-tools component missing in $ANDROID_HOME/platform-tools!"
+            exit 1
+          fi
+          echo "[OK] Android SDK Platform 36, Build Tools 36.0.0, and platform-tools verified successfully."
 
       - name: Install Buildozer & Dependencies
         run: |
@@ -116,32 +166,45 @@ jobs:
 
       - name: Determine Build Type and Extract Release Configuration
         id: mode
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_BUILD_TYPE: ${{ github.event.inputs.build_type }}
+          REF: ${{ github.ref }}
         run: |
           APP_VER=$(grep -E '^\s*version\s*=' buildozer.spec | cut -d '=' -f2 | tr -d ' ')
           if [ -z "$APP_VER" ]; then APP_VER="2.0.0"; fi
-          echo "app_version=$APP_VER" >> $GITHUB_OUTPUT
+          if ! [[ "$APP_VER" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+            echo "::error::Invalid version in buildozer.spec: $APP_VER"
+            exit 1
+          fi
+          echo "app_version=$APP_VER" >> "$GITHUB_OUTPUT"
           echo "Configured App Version: $APP_VER"
 
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "build_mode=debug" >> $GITHUB_OUTPUT
-            echo "artifact_name=UniversalDownloader-Android-Debug-APK" >> $GITHUB_OUTPUT
-            echo "Selected Build Mode: debug (Pull Request)"
-          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "build_mode=${{ github.event.inputs.build_type }}" >> $GITHUB_OUTPUT
-            if [ "${{ github.event.inputs.build_type }}" = "release" ]; then
-              echo "artifact_name=UniversalDownloader-Android-Release-APK" >> $GITHUB_OUTPUT
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            echo "build_mode=debug" >> "$GITHUB_OUTPUT"
+            echo "artifact_name=UniversalDownloader-Android-Debug-APK" >> "$GITHUB_OUTPUT"
+            echo "Selected Build Mode: debug (Pull Request - signing secrets withheld)"
+          elif [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            if [ "$INPUT_BUILD_TYPE" = "release" ]; then
+              echo "build_mode=release" >> "$GITHUB_OUTPUT"
+              echo "artifact_name=UniversalDownloader-Android-Release-APK" >> "$GITHUB_OUTPUT"
+              echo "Selected Build Mode: release (Manual Dispatch)"
+            elif [ "$INPUT_BUILD_TYPE" = "debug" ]; then
+              echo "build_mode=debug" >> "$GITHUB_OUTPUT"
+              echo "artifact_name=UniversalDownloader-Android-Debug-APK" >> "$GITHUB_OUTPUT"
+              echo "Selected Build Mode: debug (Manual Dispatch)"
             else
-              echo "artifact_name=UniversalDownloader-Android-Debug-APK" >> $GITHUB_OUTPUT
+              echo "::error::Invalid build_type input: '$INPUT_BUILD_TYPE'. Must be 'release' or 'debug'."
+              exit 1
             fi
-            echo "Selected Build Mode: ${{ github.event.inputs.build_type }} (Manual Dispatch)"
-          elif [ "${{ github.event_name }}" = "push" ] && [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            echo "build_mode=release" >> $GITHUB_OUTPUT
-            echo "artifact_name=UniversalDownloader-Android-Release-APK" >> $GITHUB_OUTPUT
+          elif [ "$EVENT_NAME" = "push" ] && [[ "$REF" == refs/tags/v* ]]; then
+            echo "build_mode=release" >> "$GITHUB_OUTPUT"
+            echo "artifact_name=UniversalDownloader-Android-Release-APK" >> "$GITHUB_OUTPUT"
             echo "Selected Build Mode: release (Tagged Release Push)"
           else
-            echo "build_mode=debug" >> $GITHUB_OUTPUT
-            echo "artifact_name=UniversalDownloader-Android-Debug-APK" >> $GITHUB_OUTPUT
-            echo "Selected Build Mode: debug (Main Branch Push CI Validation)"
+            echo "build_mode=debug" >> "$GITHUB_OUTPUT"
+            echo "artifact_name=UniversalDownloader-Android-Debug-APK" >> "$GITHUB_OUTPUT"
+            echo "Selected Build Mode: debug (Main Branch CI Validation)"
           fi
 
       - name: Clean Previous Build Artifacts
@@ -156,10 +219,19 @@ jobs:
           KEYSTORE_PASSWD: ${{ secrets.RELEASE_KEYSTORE_PASSWD }}
           KEYALIAS: ${{ secrets.RELEASE_KEYALIAS }}
           KEYALIAS_PASSWD: ${{ secrets.RELEASE_KEYALIAS_PASSWD }}
+          RELEASE_CERT_SHA256: ${{ secrets.RELEASE_CERT_SHA256 }}
         run: |
-          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWD" ] || [ -z "$KEYALIAS" ] || [ -z "$KEYALIAS_PASSWD" ]; then
-            echo "::error::Production release requires all 4 secrets: RELEASE_KEYSTORE_BASE64, RELEASE_KEYSTORE_PASSWD, RELEASE_KEYALIAS, and RELEASE_KEYALIAS_PASSWD."
-            echo "::error::Failing safely. Refusing to build an unsigned or ephemerally signed production release."
+          # 1. Enforce mandatory presence of all 5 release signing secrets
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWD" ] || [ -z "$KEYALIAS" ] || [ -z "$KEYALIAS_PASSWD" ] || [ -z "$RELEASE_CERT_SHA256" ]; then
+            echo "::error::Production release requires all 5 secrets: RELEASE_KEYSTORE_BASE64, RELEASE_KEYSTORE_PASSWD, RELEASE_KEYALIAS, RELEASE_KEYALIAS_PASSWD, and RELEASE_CERT_SHA256."
+            echo "::error::Failing safely. Refusing to build an unsigned, ephemerally signed, or untrusted production release."
+            exit 1
+          fi
+
+          # 2. Validate SHA-256 format and normalize hexadecimal characters and separators
+          CLEAN_FP=$(echo "$RELEASE_CERT_SHA256" | tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')
+          if ! [[ "$CLEAN_FP" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error::RELEASE_CERT_SHA256 format is invalid! Must be a 64-character hexadecimal SHA-256 string (with or without colons/spaces)."
             exit 1
           fi
 
@@ -178,13 +250,14 @@ jobs:
         run: |
           yes | buildozer -v android release
 
-      - name: Inspect, Align & Validate Release APK Signing
+      - name: Inspect, Align & Independently Validate Release APK Signing
         if: steps.mode.outputs.build_mode == 'release'
         env:
           KEY_PASS: ${{ secrets.RELEASE_KEYALIAS_PASSWD }}
           KEY_ALIAS: ${{ secrets.RELEASE_KEYALIAS }}
           KS_PASS: ${{ secrets.RELEASE_KEYSTORE_PASSWD }}
           TRUSTED_CERT_SECRET: ${{ secrets.RELEASE_CERT_SHA256 }}
+          APP_VERSION: ${{ steps.mode.outputs.app_version }}
         run: |
           APKSIGNER=$(find $ANDROID_HOME/build-tools -name apksigner | sort -V | tail -n 1)
           ZIPALIGN=$(find $ANDROID_HOME/build-tools -name zipalign | sort -V | tail -n 1)
@@ -202,7 +275,7 @@ jobs:
 
           # Determine whether Buildozer / Gradle already signed the APK
           set +e
-          $APKSIGNER verify --verbose "$raw_apk" > /tmp/apksigner_check.log 2>&1
+          "$APKSIGNER" verify --verbose "$raw_apk" > /tmp/apksigner_check.log 2>&1
           ALREADY_SIGNED=$?
           set -e
 
@@ -211,23 +284,25 @@ jobs:
             target_apk="$raw_apk"
           else
             echo "APK requires alignment and signature. Inspecting state..."
-            cat /tmp/apksigner_check.log || true
+            if [ -f /tmp/apksigner_check.log ]; then
+              cat /tmp/apksigner_check.log
+            fi
 
             target_apk="$raw_apk"
             if [[ "$raw_apk" == *"-unsigned.apk"* ]] || [[ "$raw_apk" == *"-unaligned.apk"* ]]; then
               aligned_apk="${raw_apk/-unsigned.apk/-aligned.apk}"
               aligned_apk="${aligned_apk/-unaligned.apk/-aligned.apk}"
-              $ZIPALIGN -f -v -p 4 "$raw_apk" "$aligned_apk"
+              "$ZIPALIGN" -f -v -p 4 "$raw_apk" "$aligned_apk"
               target_apk="$aligned_apk"
             else
-              $ZIPALIGN -c 4 "$raw_apk" || {
-                $ZIPALIGN -f -v -p 4 "$raw_apk" "bin/aligned_temp.apk"
+              "$ZIPALIGN" -c 4 "$raw_apk" || {
+                "$ZIPALIGN" -f -v -p 4 "$raw_apk" "bin/aligned_temp.apk"
                 target_apk="bin/aligned_temp.apk"
               }
             fi
 
             echo "Signing $target_apk with release keystore..."
-            $APKSIGNER sign \
+            "$APKSIGNER" sign \
               --ks /home/runner/.keystores/release.keystore \
               --ks-key-alias "$KEY_ALIAS" \
               --ks-pass "pass:$KS_PASS" \
@@ -242,7 +317,7 @@ jobs:
           # Production APK Signature & Identity Verification
           echo "Executing rigorous cryptographic signature verification:"
           set +e
-          $APKSIGNER verify --print-certs --verbose "$target_apk" > /tmp/cert_verify.log 2>&1
+          "$APKSIGNER" verify --print-certs --verbose "$target_apk" > /tmp/cert_verify.log 2>&1
           SIGN_STATUS=$?
           set -e
 
@@ -260,33 +335,40 @@ jobs:
             exit 1
           fi
 
-          # Extract Subject DN and fail if signed with Android Debug certificate
+          # Reject debug identities
           if grep -i "CN=Android Debug" /tmp/cert_verify.log || grep -i "O=Android" /tmp/cert_verify.log; then
             echo "::error::Production APK is signed with Android Debug certificate! Failing build."
             exit 1
           fi
 
-          # Compute expected SHA-256 fingerprint directly from trusted release keystore
-          EXPECTED_KS_FP=$(keytool -exportcert -alias "$KEY_ALIAS" -keystore /home/runner/.keystores/release.keystore -storepass "$KS_PASS" | sha256sum | awk '{print $1}' | tr '[:upper:]' '[:lower:]' | tr -d ':')
-          
-          echo "=== SIGNATURE FINGERPRINT VERIFICATION ==="
-          echo "Expected Keystore Certificate SHA-256: $EXPECTED_KS_FP"
-          echo "Actual APK Signer Certificate SHA-256:  $ACTUAL_CERT_FP"
-
-          if [ "$ACTUAL_CERT_FP" != "$EXPECTED_KS_FP" ]; then
-            echo "::error::Signing identity mismatch! The APK was signed with an unexpected certificate ($ACTUAL_CERT_FP vs $EXPECTED_KS_FP)."
+          # Normalize mandatory trusted fingerprint secret
+          NORMALIZED_TRUSTED_FP=$(echo "$TRUSTED_CERT_SECRET" | tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')
+          if ! [[ "$NORMALIZED_TRUSTED_FP" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error::Mandatory RELEASE_CERT_SHA256 secret is invalid format: $TRUSTED_CERT_SECRET"
             exit 1
           fi
 
-          # If an explicit RELEASE_CERT_SHA256 secret is configured, cross-verify against it
-          if [ -n "$TRUSTED_CERT_SECRET" ]; then
-            TRUSTED_SECRET_FP=$(echo "$TRUSTED_CERT_SECRET" | tr '[:upper:]' '[:lower:]' | tr -d ': ')
-            if [ "$ACTUAL_CERT_FP" != "$TRUSTED_SECRET_FP" ]; then
-              echo "::error::APK certificate fingerprint does not match trusted RELEASE_CERT_SHA256 secret ($ACTUAL_CERT_FP vs $TRUSTED_SECRET_FP)!"
-              exit 1
-            fi
-            echo "Cross-verified successfully against trusted RELEASE_CERT_SHA256 secret."
+          # Also extract keystore fingerprint for comparison
+          EXPECTED_KS_FP=$(keytool -exportcert -alias "$KEY_ALIAS" -keystore /home/runner/.keystores/release.keystore -storepass "$KS_PASS" | sha256sum | awk '{print $1}' | tr '[:upper:]' '[:lower:]' | tr -d ':')
+
+          echo "=== SIGNATURE FINGERPRINT VERIFICATION ==="
+          echo "Independent Trusted SHA-256:       $NORMALIZED_TRUSTED_FP"
+          echo "Actual APK Signer SHA-256:         $ACTUAL_CERT_FP"
+          echo "Supplied Keystore Certificate SHA: $EXPECTED_KS_FP"
+
+          # 1. Independent trust verification: APK signer must match the independent trusted fingerprint
+          if [ "$ACTUAL_CERT_FP" != "$NORMALIZED_TRUSTED_FP" ]; then
+            echo "::error::Independent trust verification failed! Actual APK signer certificate ($ACTUAL_CERT_FP) does not match trusted RELEASE_CERT_SHA256 ($NORMALIZED_TRUSTED_FP)."
+            exit 1
           fi
+
+          # 2. Supplied keystore must also match the independent trusted identity
+          if [ "$EXPECTED_KS_FP" != "$NORMALIZED_TRUSTED_FP" ]; then
+            echo "::error::Supplied keystore does not match trusted RELEASE_CERT_SHA256 ($EXPECTED_KS_FP vs $NORMALIZED_TRUSTED_FP)!"
+            exit 1
+          fi
+
+          echo "[OK] Independent cryptographic identity successfully verified against RELEASE_CERT_SHA256."
 
           # Verify modern signature scheme presence (v2 / v3)
           if ! grep -q "Verified using v2 scheme (APK Signature Scheme v2): true" /tmp/cert_verify.log && \
@@ -295,15 +377,29 @@ jobs:
             exit 1
           fi
 
-          APP_VERSION="${{ steps.mode.outputs.app_version }}"
           FINAL_APK="dist_apk/UniversalDownloader-v${APP_VERSION}.apk"
           cp "$target_apk" "$FINAL_APK"
           echo "Final verified release APK: $FINAL_APK"
           APK_SHA=$(sha256sum "$FINAL_APK" | awk '{print $1}')
           echo "APK SHA-256: $APK_SHA"
 
+          # Verify compiled APK manifest (targetSdkVersion 36)
+          AAPT=$(find $ANDROID_HOME/build-tools -name aapt | sort -V | tail -n 1)
+          if [ -x "$AAPT" ]; then
+            echo "Inspecting compiled APK manifest via aapt..."
+            "$AAPT" dump badging "$FINAL_APK" > /tmp/apk_badging.txt
+            if ! grep -q "targetSdkVersion:'36'" /tmp/apk_badging.txt; then
+              echo "::error::Compiled APK does not target API 36!"
+              cat /tmp/apk_badging.txt
+              exit 1
+            fi
+            echo "[OK] Compiled APK verified targeting Android API 36."
+          fi
+
       - name: Build Debug APK with Buildozer
         if: steps.mode.outputs.build_mode == 'debug'
+        env:
+          APP_VERSION: ${{ steps.mode.outputs.app_version }}
         run: |
           yes | buildozer -v android debug
           DEBUG_APKS=(bin/*.apk)
@@ -311,11 +407,23 @@ jobs:
             echo "::error::No debug APK produced in bin/ by Buildozer!"
             exit 1
           fi
-          APP_VERSION="${{ steps.mode.outputs.app_version }}"
           DEBUG_APK="dist_apk/UniversalDownloader-v${APP_VERSION}-debug.apk"
           cp "${DEBUG_APKS[0]}" "$DEBUG_APK"
           echo "Final debug APK: $DEBUG_APK"
           sha256sum "$DEBUG_APK"
+
+          # Verify compiled debug APK manifest
+          AAPT=$(find $ANDROID_HOME/build-tools -name aapt | sort -V | tail -n 1)
+          if [ -x "$AAPT" ]; then
+            echo "Inspecting compiled debug APK manifest..."
+            "$AAPT" dump badging "$DEBUG_APK" > /tmp/debug_badging.txt
+            if ! grep -q "targetSdkVersion:'36'" /tmp/debug_badging.txt; then
+              echo "::error::Compiled APK does not target API 36!"
+              cat /tmp/debug_badging.txt
+              exit 1
+            fi
+            echo "[OK] Compiled debug APK verified targeting Android API 36."
+          fi
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
@@ -336,6 +444,8 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Download Built Release APK Artifact
         uses: actions/download-artifact@v4
@@ -343,22 +453,64 @@ jobs:
           name: UniversalDownloader-Android-Release-APK
           path: dist_apk
 
-      - name: Determine Non-Colliding Release Tag
+      - name: Validate and Determine Non-Colliding Release Tag
         id: release_meta
+        env:
+          EVENT_REF_TYPE: ${{ github.ref_type }}
+          EVENT_REF_NAME: ${{ github.ref_name }}
+          INPUT_RELEASE_TAG: ${{ github.event.inputs.release_tag }}
+          RUN_NUMBER: ${{ github.run_number }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           APP_VERSION=$(grep -E '^\s*version\s*=' buildozer.spec | cut -d '=' -f2 | tr -d ' ')
           if [ -z "$APP_VERSION" ]; then APP_VERSION="2.0.0"; fi
-          echo "app_version=$APP_VERSION" >> $GITHUB_OUTPUT
+          echo "app_version=$APP_VERSION" >> "$GITHUB_OUTPUT"
 
-          if [ "${{ github.ref_type }}" = "tag" ]; then
-            TAG_NAME="${{ github.ref_name }}"
-          elif [ -n "${{ github.event.inputs.release_tag }}" ]; then
-            TAG_NAME="${{ github.event.inputs.release_tag }}"
+          if [ "$EVENT_REF_TYPE" = "tag" ]; then
+            RAW_TAG="$EVENT_REF_NAME"
+            IS_MANUAL=false
+          elif [ -n "$INPUT_RELEASE_TAG" ]; then
+            RAW_TAG="$INPUT_RELEASE_TAG"
+            IS_MANUAL=true
           else
-            TAG_NAME="v${APP_VERSION}-release.build-${{ github.run_number }}.${{ github.run_attempt }}"
+            RAW_TAG="v${APP_VERSION}-release.build-${RUN_NUMBER}.${RUN_ATTEMPT}"
+            IS_MANUAL=false
           fi
-          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
-          echo "Target Release Tag: $TAG_NAME"
+
+          # 1. Enforce strict character validation on tag name (eliminate shell & reference injection)
+          if ! [[ "$RAW_TAG" =~ ^v?[0-9A-Za-z._-]+$ ]]; then
+            echo "::error::Tag name '$RAW_TAG' contains invalid characters! Only alphanumeric, dots, hyphens, and underscores are allowed."
+            exit 1
+          fi
+
+          # 2. Enforce standard git check-ref-format
+          if ! git check-ref-format --allow-onelevel "tags/$RAW_TAG"; then
+            echo "::error::Tag name '$RAW_TAG' is not a valid Git reference name."
+            exit 1
+          fi
+
+          # 3. If a tag was manually requested via input, check if it already exists and fail
+          if [ "$IS_MANUAL" = true ]; then
+            if git ls-remote --tags origin "refs/tags/$RAW_TAG" | grep -q "refs/tags/$RAW_TAG$"; then
+              echo "::error::Manually requested release tag '$RAW_TAG' already exists on origin! Failing safely to prevent overwriting."
+              exit 1
+            fi
+            if git tag -l "$RAW_TAG" | grep -q "^$RAW_TAG$"; then
+              echo "::error::Manually requested release tag '$RAW_TAG' already exists locally! Failing safely to prevent overwriting."
+              exit 1
+            fi
+          fi
+
+          # 4. For automatic tags, ensure uniqueness
+          if [ "$IS_MANUAL" = false ] && [ "$EVENT_REF_TYPE" != "tag" ]; then
+            if git ls-remote --tags origin "refs/tags/$RAW_TAG" | grep -q "refs/tags/$RAW_TAG$"; then
+              RAW_TAG="${RAW_TAG}.$(date +%s)"
+            fi
+          fi
+
+          # Protect GITHUB_OUTPUT from newline injection
+          echo "tag_name=$RAW_TAG" >> "$GITHUB_OUTPUT"
+          echo "Target Release Tag: $RAW_TAG"
 
       - name: Create GitHub Release with Verified APK
         uses: softprops/action-gh-release@v2
@@ -368,9 +520,10 @@ jobs:
           body: |
             ### Universal Downloader for Android (v${{ steps.release_meta.outputs.app_version }}) - Production Release
             - **Target Android API**: Aligned with Google Play submission requirements (Target API 36: Android 16).
-            - **Cryptographic Signature Verification**: Verified via `apksigner` with release certificate SHA-256 fingerprint matching the trusted release identity.
-            - **Storage Access Framework (SAF) & MediaStore**: Compliant Scoped Storage with least-privilege permissions (`INTERNET`, `ACCESS_NETWORK_STATE`).
-            - **Security & Integrity**: Zero debuggable flags (`android:debuggable="false"`), strict TLS certificate verification, and 28 regression tests executed and passed in CI.
+            - **Cryptographic Signature Verification**: Independently verified against trusted `RELEASE_CERT_SHA256` identity with modern APK Signature Scheme v2/v3.
+            - **Storage Access Framework (SAF) & MediaStore**: Compliant Scoped Storage distinguishing SAF tree URIs, SAF document URIs, and MediaStore collections.
+            - **Automated Test Results**: ${{ needs.test.outputs.tests_passed }} passed, ${{ needs.test.outputs.tests_skipped }} skipped (live network), ${{ needs.test.outputs.tests_failed }} failed out of ${{ needs.test.outputs.tests_total }} total regression tests in CI.
+            - **Security & Integrity**: Zero debuggable flags (`android:debuggable="false"`), strict TLS certificate verification, and least-privilege permissions (`INTERNET`, `ACCESS_NETWORK_STATE`).
           files: dist_apk/*.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

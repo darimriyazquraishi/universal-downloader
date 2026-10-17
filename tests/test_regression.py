@@ -338,10 +338,18 @@ class TestBuildozerAndWorkflowPaths(unittest.TestCase):
         self.assertIn("APP_VERSION", wf)
 
         # Verify strict cryptographic signature verification and fingerprint matching
-        self.assertTrue("apksigner verify --print-certs" in wf or "$APKSIGNER verify --print-certs" in wf, "Workflow must verify signature with apksigner --print-certs")
+        self.assertTrue(any(p in wf for p in ["apksigner verify --print-certs", "$APKSIGNER verify --print-certs", '"$APKSIGNER" verify --print-certs']), "Workflow must verify signature with apksigner --print-certs")
         self.assertIn("EXPECTED_KS_FP", wf)
         self.assertIn("ACTUAL_CERT_FP", wf)
         self.assertIn("CN=Android Debug", wf)
+        self.assertIn("RELEASE_CERT_SHA256", wf, "Workflow must mandate independent trusted RELEASE_CERT_SHA256")
+        self.assertNotIn("|| true", wf, "Workflow commands must not mask errors with '|| true'")
+        # Verify shell injection is eliminated: inputs passed through explicit env vars and not inline in shell
+        self.assertIn("INPUT_RELEASE_TAG:", wf)
+        self.assertIn("INPUT_BUILD_TYPE:", wf)
+        self.assertNotIn('="${{ github.event.inputs.release_tag }}"', wf)
+        self.assertNotIn('="${{ github.event.inputs.build_type }}"', wf)
+        self.assertNotIn('build_mode=${{ github.event.inputs.build_type }}', wf)
 
         # Verify collision-safe release tags
         self.assertIn("github.run_attempt", wf)
@@ -361,23 +369,52 @@ class TestReleaseSecretValidation(unittest.TestCase):
     """Verify release secrets validation logic fails safely and prevents secret leakage."""
 
     def test_secret_validation_fails_on_missing_credentials(self):
-        def validate_secrets(keystore_b64, ks_pass, key_alias, key_pass):
-            if not keystore_b64 or not ks_pass or not key_alias or not key_pass:
-                return False, "Production release requires all 4 secrets. Failing safely."
-            return True, "All credentials present."
+        def validate_secrets(keystore_b64, ks_pass, key_alias, key_pass, cert_sha256):
+            if not keystore_b64 or not ks_pass or not key_alias or not key_pass or not cert_sha256:
+                return False, "Production release requires all 5 secrets. Failing safely."
+            clean_fp = cert_sha256.replace(":", "").replace(" ", "").lower()
+            if len(clean_fp) != 64 or not all(c in "0123456789abcdef" for c in clean_fp):
+                return False, "Invalid SHA-256 fingerprint format."
+            return True, "All credentials present and verified."
 
         # Test all permutations of missing credentials
-        self.assertFalse(validate_secrets("", "pass", "alias", "pass")[0])
-        self.assertFalse(validate_secrets("b64", "", "alias", "pass")[0])
-        self.assertFalse(validate_secrets("b64", "pass", "", "pass")[0])
-        self.assertFalse(validate_secrets("b64", "pass", "alias", "")[0])
+        self.assertFalse(validate_secrets("", "pass", "alias", "pass", "a"*64)[0])
+        self.assertFalse(validate_secrets("b64", "", "alias", "pass", "a"*64)[0])
+        self.assertFalse(validate_secrets("b64", "pass", "", "pass", "a"*64)[0])
+        self.assertFalse(validate_secrets("b64", "pass", "alias", "", "a"*64)[0])
+        self.assertFalse(validate_secrets("b64", "pass", "alias", "pass", "")[0])
 
-        success, msg = validate_secrets("valid_b64", "pass1", "alias1", "pass2")
+        success, msg = validate_secrets("valid_b64", "pass1", "alias1", "pass2", "a"*64)
         self.assertTrue(success)
+
+    def test_trusted_cert_fingerprint_normalization_and_validation(self):
+        def normalize_and_validate_fp(raw_fp):
+            if not raw_fp:
+                return None, False
+            clean = raw_fp.replace(":", "").replace(" ", "").strip().lower()
+            if len(clean) == 64 and all(c in "0123456789abcdef" for c in clean):
+                return clean, True
+            return clean, False
+
+        # Valid with colons and uppercase
+        norm, valid = normalize_and_validate_fp("AA:BB:CC:DD:EE:FF:11:22:33:44:55:66:77:88:99:00:AA:BB:CC:DD:EE:FF:11:22:33:44:55:66:77:88:99:00")
+        self.assertTrue(valid)
+        self.assertEqual(len(norm), 64)
+        self.assertNotIn(":", norm)
+
+        # Valid with spaces
+        norm, valid = normalize_and_validate_fp("aa bb cc dd ee ff 11 22 33 44 55 66 77 88 99 00 aa bb cc dd ee ff 11 22 33 44 55 66 77 88 99 00")
+        self.assertTrue(valid)
+
+        # Invalid (short or non-hex)
+        _, valid = normalize_and_validate_fp("tooshort")
+        self.assertFalse(valid)
+        _, valid = normalize_and_validate_fp("ZZ"*32)
+        self.assertFalse(valid)
 
     def test_secret_values_never_printed_in_error_messages(self):
         sensitive_pass = "SuperSecretPassword123!"
-        error_msg = "::error::Production release requires all 4 secrets: RELEASE_KEYSTORE_BASE64, RELEASE_KEYSTORE_PASSWD, RELEASE_KEYALIAS, and RELEASE_KEYALIAS_PASSWD."
+        error_msg = "::error::Production release requires all 5 secrets: RELEASE_KEYSTORE_BASE64, RELEASE_KEYSTORE_PASSWD, RELEASE_KEYALIAS, RELEASE_KEYALIAS_PASSWD, and RELEASE_CERT_SHA256."
         self.assertNotIn(sensitive_pass, error_msg)
 
 
@@ -409,16 +446,51 @@ class TestSecretHygieneAndArtifactIntegrity(unittest.TestCase):
 class TestStorageDestinationAndUriHandling(unittest.TestCase):
     """Verify Android SAF URI parsing, path traversal protection, and storage destination validation."""
 
-    def test_is_saf_uri_detection(self):
-        self.assertTrue(engine.is_saf_uri("content://com.android.externalstorage.documents/tree/primary%3ADownload"))
-        self.assertTrue(engine.is_saf_uri("content://media/external/images/media/123"))
-        self.assertTrue(engine.is_content_uri("content://media/external/downloads"))
-        self.assertFalse(engine.is_saf_uri("/storage/emulated/0/Download"))
-        self.assertFalse(engine.is_content_uri("/storage/emulated/0/Download"))
-        self.assertFalse(engine.is_saf_uri("C:\\Users\\User\\Downloads"))
+    def test_uri_classification_distinguishes_types(self):
+        saf_tree = "content://com.android.externalstorage.documents/tree/primary%3ADownload"
+        saf_doc = "content://com.android.externalstorage.documents/document/primary%3ADownload%2Fvideo.mp4"
+        media_down = "content://media/external/downloads"
+        media_item = "content://media/external/images/media/123"
+        posix_path = "/storage/emulated/0/Download"
+        win_path = "C:\\Users\\User\\Downloads"
+
+        # Tree URI classification
+        self.assertTrue(engine.is_tree_uri(saf_tree))
+        self.assertFalse(engine.is_tree_uri(saf_doc))
+        self.assertFalse(engine.is_tree_uri(media_down))
+        self.assertFalse(engine.is_tree_uri(posix_path))
+
+        # Document URI classification
+        self.assertTrue(engine.is_document_uri(saf_doc))
+        self.assertFalse(engine.is_document_uri(saf_tree))
+        self.assertFalse(engine.is_document_uri(media_down))
+
+        # SAF URI (tree or document)
+        self.assertTrue(engine.is_saf_uri(saf_tree))
+        self.assertTrue(engine.is_saf_uri(saf_doc))
+        # Critical assertion: MediaStore URIs are NOT SAF URIs
+        self.assertFalse(engine.is_saf_uri(media_down))
+        self.assertFalse(engine.is_saf_uri(media_item))
+        self.assertFalse(engine.is_saf_uri(posix_path))
         self.assertFalse(engine.is_saf_uri(None))
 
-    def test_ensure_valid_download_dir_preserves_saf_uri(self):
+        # MediaStore URI classification
+        self.assertTrue(engine.is_mediastore_uri(media_down))
+        self.assertTrue(engine.is_mediastore_uri(media_item))
+        self.assertFalse(engine.is_mediastore_uri(saf_tree))
+        self.assertFalse(engine.is_mediastore_uri(saf_doc))
+        self.assertFalse(engine.is_mediastore_uri(posix_path))
+
+        # General content URI classification
+        self.assertTrue(engine.is_content_uri(saf_tree))
+        self.assertTrue(engine.is_content_uri(saf_doc))
+        self.assertTrue(engine.is_content_uri(media_down))
+        self.assertTrue(engine.is_content_uri(media_item))
+        self.assertFalse(engine.is_content_uri(posix_path))
+        self.assertFalse(engine.is_content_uri(win_path))
+        self.assertFalse(engine.is_content_uri(None))
+
+    def test_ensure_valid_download_dir_preserves_content_uris(self):
         saf_uri = "content://com.android.externalstorage.documents/tree/primary%3AMusic"
         result = engine.ensure_valid_download_dir(saf_uri)
         self.assertEqual(result, saf_uri, "ensure_valid_download_dir must preserve SAF URIs without attempting filesystem operations")
@@ -439,13 +511,30 @@ class TestStorageDestinationAndUriHandling(unittest.TestCase):
         self.assertEqual(engine.uri_to_display_name("/storage/emulated/0/Download"), "/storage/emulated/0/Download")
         self.assertEqual(engine.uri_to_display_name(None), "Default: Downloads")
 
-    def test_uri_to_path_traversal_prevention(self):
-        # Attacker crafts primary URI with directory traversal
-        malicious_uri = "content://com.android.externalstorage.documents/tree/primary%3A..%2F..%2Fsystem%2Fbin"
-        path = engine.uri_to_path(malicious_uri)
-        # Must not escape /storage/emulated/0
-        self.assertTrue(path.startswith("/storage/emulated/0"))
-        self.assertNotIn("system/bin", path)
+    def test_uri_to_path_rejects_content_uris(self):
+        # Scoped Storage rule: content URIs cannot be converted to POSIX paths
+        self.assertIsNone(engine.uri_to_path("content://com.android.externalstorage.documents/tree/primary%3ADownload"))
+        self.assertIsNone(engine.uri_to_path("content://media/external/downloads"))
+        self.assertIsNone(engine.uri_to_path("content://com.android.externalstorage.documents/tree/primary%3A..%2F..%2Fsystem%2Fbin"))
+        # File URIs and filesystem paths are normalized
+        self.assertEqual(engine.uri_to_path("file:///storage/emulated/0/test.mp4"), "/storage/emulated/0/test.mp4")
+        self.assertIsNone(engine.uri_to_path(None))
+
+    def test_custom_destination_failure_preserves_staging_and_raises(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            staging_file = os.path.join(tmpdir, "staging_test.mp4")
+            with open(staging_file, "w") as f:
+                f.write("test content")
+
+            # Simulate Android environment where writing to SAF tree fails
+            with patch.object(engine, "IS_ANDROID", True):
+                with patch.dict(engine.__dict__, {"autoclass": MagicMock(side_effect=RuntimeError("SAF access revoked"))}):
+                    custom_tree = "content://com.android.externalstorage.documents/tree/primary%3AFolder"
+                    with self.assertRaises(IOError) as ctx:
+                        engine.save_file_to_destination(staging_file, custom_tree, "test.mp4")
+                    self.assertIn("Failed to save to selected custom folder", str(ctx.exception))
+                    # Staging file MUST NOT be deleted or moved!
+                    self.assertTrue(os.path.exists(staging_file), "Staging file must be preserved upon destination failure")
 
     def test_ensure_valid_download_dir_writable(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -466,6 +555,7 @@ class TestStorageDestinationAndUriHandling(unittest.TestCase):
             self.assertTrue(os.path.exists(final_path))
             self.assertEqual(os.path.basename(final_path), "test_track.mp4")
             self.assertFalse(os.path.exists(staging_file), "Staging file should be moved/cleaned up")
+
 
 
 # ===========================================================================

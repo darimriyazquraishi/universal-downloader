@@ -1016,7 +1016,7 @@ class HomeScreen(Screen):
                 self.app_ref.manager_screen.mark_completed(name, full_path)
             except Exception:
                 pass
-            if IS_ANDROID and full_path and not engine.is_saf_uri(full_path) and os.path.exists(full_path):
+            if IS_ANDROID and full_path and not engine.is_content_uri(full_path) and os.path.exists(full_path):
                 try:
                     MediaScannerConnection = autoclass('android.media.MediaScannerConnection')
                     PythonActivity = autoclass('org.kivy.android.PythonActivity')
@@ -1213,8 +1213,8 @@ class ManagerScreen(Screen):
                 return
             if IS_ANDROID:
                 try:
-                    is_saf = engine.is_saf_uri(path)
-                    if not is_saf:
+                    is_content = engine.is_content_uri(path)
+                    if not is_content:
                         # If file is trapped in private Android/data, copy to public Downloads so player has full access
                         if "android/data" in str(path).lower() and os.path.exists(path):
                             pub_dir = engine.get_public_download_dir()
@@ -1241,8 +1241,8 @@ class ManagerScreen(Screen):
                     is_audio = str(path).lower().endswith(('.mp3', '.m4a', '.wav', '.opus', '.aac', '.flac')) or "audio" in str(path).lower()
                     mime = "video/*" if is_video else ("audio/*" if is_audio else "*/*")
 
-                    # Case 1: SAF Document URI (content://...)
-                    if is_saf:
+                    # Case 1: Content URI (SAF document or MediaStore item)
+                    if is_content:
                         target_uri = Uri.parse(str(path))
                         try:
                             resolved_mime = currentActivity.getContentResolver().getType(target_uri)
@@ -1312,15 +1312,17 @@ class ManagerScreen(Screen):
             cfg = engine.load_settings()
             default_dir = cfg.get("download_dir", engine.get_default_download_dir())
 
-            if path and not engine.is_saf_uri(path):
+            if path and not engine.is_content_uri(path):
                 if os.path.isfile(path):
                     folder = os.path.dirname(path)
                 elif os.path.isdir(path):
                     folder = path
                 else:
                     folder = default_dir
-            elif path and engine.is_saf_uri(path):
-                folder = default_dir if engine.is_saf_uri(default_dir) else engine.get_default_download_dir()
+            elif path and engine.is_tree_uri(path):
+                folder = path
+            elif path and engine.is_content_uri(path):
+                folder = default_dir
             else:
                 folder = default_dir
 
@@ -1332,8 +1334,8 @@ class ManagerScreen(Screen):
                     Uri = autoclass('android.net.Uri')
                     DownloadManager = autoclass('android.app.DownloadManager')
 
-                    # Case 1: SAF Tree URI (content://...)
-                    if engine.is_saf_uri(folder):
+                    # Case 1: SAF Tree URI (user-selected folder via ACTION_OPEN_DOCUMENT_TREE)
+                    if engine.is_tree_uri(folder):
                         try:
                             DocumentsContract = autoclass('android.provider.DocumentsContract')
                             tree_uri = Uri.parse(str(folder))
@@ -1348,8 +1350,8 @@ class ManagerScreen(Screen):
                         except Exception:
                             pass
 
-                    # Case 2: If folder is Downloads or public storage, use system DownloadManager intent
-                    if "download" in str(folder).lower():
+                    # Case 2: MediaStore or standard public downloads
+                    if engine.is_mediastore_uri(folder) or "download" in str(folder).lower():
                         try:
                             intent = Intent(DownloadManager.ACTION_VIEW_DOWNLOADS)
                             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -1370,6 +1372,7 @@ class ManagerScreen(Screen):
                         return
                     except Exception:
                         pass
+
 
                     # Priority 3: Use file explorer intent
                     StrictMode = autoclass('android.os.StrictMode')
