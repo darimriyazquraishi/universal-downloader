@@ -117,9 +117,130 @@ def get_default_download_dir():
             return os.path.normpath(os.path.join(user_downloads, "Media Downloads"))
         return os.path.normpath(os.path.join(os.path.dirname(__file__), "downloads"))
 
+def is_saf_uri(path_or_uri):
+    """Check if target string is an Android Storage Access Framework content:// URI."""
+    if not path_or_uri:
+        return False
+    return str(path_or_uri).strip().startswith("content://")
+
+def get_staging_download_dir():
+    """Retrieve an always-writable staging directory for progressive downloading & muxing."""
+    if IS_ANDROID:
+        try:
+            PythonActivity = autoclass('org.kivy.android.PythonActivity')
+            activity = PythonActivity.mActivity
+            cache_dir = activity.getExternalCacheDir()
+            if cache_dir:
+                p = cache_dir.getAbsolutePath()
+                os.makedirs(p, exist_ok=True)
+                return p
+        except Exception:
+            pass
+        try:
+            files_dir = activity.getFilesDir()
+            if files_dir:
+                p = os.path.join(files_dir.getAbsolutePath(), "staging")
+                os.makedirs(p, exist_ok=True)
+                return p
+        except Exception:
+            pass
+    return get_default_download_dir()
+
+def save_file_to_destination(staging_filepath, destination_dir_or_uri, display_name, mime_type="video/mp4"):
+    """
+    Export completed download from staging path into the final destination.
+    Seamlessly handles both Storage Access Framework (SAF) content:// tree URIs and standard filesystem paths.
+    """
+    if not os.path.exists(staging_filepath):
+        raise FileNotFoundError(f"Staged download not found at {staging_filepath}")
+
+    # Case 1: Android Storage Access Framework content:// tree URI
+    if IS_ANDROID and is_saf_uri(destination_dir_or_uri):
+        try:
+            PythonActivity = autoclass('org.kivy.android.PythonActivity')
+            activity = PythonActivity.mActivity
+            resolver = activity.getContentResolver()
+            Uri = autoclass('android.net.Uri')
+            DocumentsContract = autoclass('android.provider.DocumentsContract')
+
+            tree_uri = Uri.parse(destination_dir_or_uri)
+            doc_id = DocumentsContract.getTreeDocumentId(tree_uri)
+            parent_doc_uri = DocumentsContract.buildDocumentUriUsingTree(tree_uri, doc_id)
+
+            new_doc_uri = DocumentsContract.createDocument(resolver, parent_doc_uri, mime_type, display_name)
+            if new_doc_uri:
+                out_stream = resolver.openOutputStream(new_doc_uri)
+                with open(staging_filepath, "rb") as in_f:
+                    while True:
+                        chunk = in_f.read(65536)
+                        if not chunk:
+                            break
+                        out_stream.write(bytes(chunk))
+                out_stream.flush()
+                out_stream.close()
+                try:
+                    os.remove(staging_filepath)
+                except Exception:
+                    pass
+                return str(new_doc_uri.toString())
+        except Exception:
+            # Fallback to saving in default downloads folder if SAF export fails
+            pass
+
+    # Case 2: Standard filesystem destination
+    dest_dir = destination_dir_or_uri if not is_saf_uri(destination_dir_or_uri) else get_default_download_dir()
+    dest_dir = ensure_valid_download_dir(dest_dir)
+    target_path = os.path.join(dest_dir, display_name)
+
+    # Handle overwrite or existing files
+    if os.path.exists(target_path):
+        base, ext = os.path.splitext(display_name)
+        target_path = os.path.join(dest_dir, f"{base}_{int(time.time())}{ext}")
+
+    try:
+        shutil.move(staging_filepath, target_path)
+    except Exception:
+        shutil.copy2(staging_filepath, target_path)
+        try:
+            os.remove(staging_filepath)
+        except Exception:
+            pass
+
+    if IS_ANDROID and os.path.exists(target_path):
+        try:
+            MediaScannerConnection = autoclass('android.media.MediaScannerConnection')
+            PythonActivity = autoclass('org.kivy.android.PythonActivity')
+            context = PythonActivity.mActivity
+            MediaScannerConnection.scanFile(context, [target_path], None, None)
+        except Exception:
+            pass
+
+    return target_path
+
+def uri_to_display_name(uri_or_path):
+    """Generate human-readable representation of directory path or SAF tree URI."""
+    if not uri_or_path:
+        return "Default: Downloads"
+    s = str(uri_or_path)
+    if is_saf_uri(s):
+        import urllib.parse
+        decoded = urllib.parse.unquote(s)
+        if "primary:" in decoded:
+            rel = decoded.split("primary:")[-1].strip("/")
+            return f"Selected Folder: {rel}" if rel else "Selected Folder: Internal Storage"
+        elif "/tree/" in decoded:
+            part = decoded.split("/tree/")[-1]
+            return f"Selected Folder: {part}"
+        return "Selected Folder (SAF)"
+    return s
+
 def ensure_valid_download_dir(dir_path=None):
-    """Ensure directory exists and is writable, returning a safe, verified path."""
+    """Ensure directory exists and is writable, returning a safe, verified path or SAF URI."""
     if dir_path:
+        # If already a valid Storage Access Framework URI, preserve it directly
+        if is_saf_uri(dir_path):
+            return str(dir_path)
+
         # Automatic upgrade: if old settings had the locked Android/data path, migrate to public Downloads!
         if IS_ANDROID and "Android/data" in dir_path:
             pub = get_public_download_dir()

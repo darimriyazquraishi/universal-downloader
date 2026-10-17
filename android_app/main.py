@@ -802,7 +802,8 @@ class HomeScreen(Screen):
                 return
 
             cfg = engine.load_settings()
-            dest_dir = engine.ensure_valid_download_dir(cfg.get("download_dir"))
+            dest_target = engine.ensure_valid_download_dir(cfg.get("download_dir"))
+            staging_dir = engine.get_staging_download_dir()
 
             # Smart target URL resolution: Single video vs Playlist
             parsed = engine.parse_url_structure(url)
@@ -845,14 +846,14 @@ class HomeScreen(Screen):
                         filename_base = f"{clean_title} [{q_tag}]"
                     else:
                         q_tag = "320k" if self.selected_format == "mp3_320" else ("192k" if self.selected_format == "mp3_192" else ("m4a" if self.selected_format == "m4a" else "128k"))
-                        plain_path = os.path.join(dest_dir, f"{cleaned}.{ext_target}")
+                        plain_path = os.path.join(staging_dir, f"{cleaned}.{ext_target}")
                         if os.path.exists(plain_path):
                             clean_title = re.sub(r'\s*\[(320k|192k|128k|m4a)\]$', '', cleaned, flags=re.IGNORECASE)
                             filename_base = f"{clean_title} [{q_tag}]"
                         else:
                             filename_base = cleaned
 
-                    full_path = os.path.join(dest_dir, f"{filename_base}.{ext_target}")
+                    full_path = os.path.join(staging_dir, f"{filename_base}.{ext_target}")
 
                     try:
                         Clock.schedule_once(lambda dt, n=filename_base, p=full_path, f=self.selected_format: self.app_ref.manager_screen.add_item(n, "⏳ Downloading...", p, f), 0)
@@ -898,7 +899,7 @@ class HomeScreen(Screen):
                                 }
                             },
                             'format': fmt_str,
-                            'outtmpl': os.path.join(dest_dir, f"{filename_base}.%(ext)s"),
+                            'outtmpl': os.path.join(staging_dir, f"{filename_base}.%(ext)s"),
                             'overwrites': True,
                             'progress_hooks': [progress_hook],
                             'http_headers': {
@@ -926,7 +927,7 @@ class HomeScreen(Screen):
                                 },
                                 'format': fmt_str,
                                 'merge_output_format': 'mp4',
-                                'outtmpl': os.path.join(dest_dir, f"{filename_base}.%(ext)s"),
+                                'outtmpl': os.path.join(staging_dir, f"{filename_base}.%(ext)s"),
                                 'overwrites': True,
                                 'progress_hooks': [progress_hook],
                                 'http_headers': {
@@ -944,7 +945,7 @@ class HomeScreen(Screen):
                                     }
                                 },
                                 'format': 'bestaudio/best',
-                                'outtmpl': os.path.join(dest_dir, f"{filename_base}.%(ext)s"),
+                                'outtmpl': os.path.join(staging_dir, f"{filename_base}.%(ext)s"),
                                 'overwrites': True,
                                 'progress_hooks': [progress_hook],
                                 'postprocessors': postprocessors,
@@ -958,26 +959,24 @@ class HomeScreen(Screen):
                         info = ydl.extract_info(target_download_url, download=True)
                         actual_path = ydl.prepare_filename(info) if info else ""
                         if not actual_path or not os.path.exists(actual_path):
-                            for f in os.listdir(dest_dir):
+                            for f in os.listdir(staging_dir):
                                 if f.startswith(filename_base):
-                                    actual_path = os.path.join(dest_dir, f)
+                                    actual_path = os.path.join(staging_dir, f)
                                     break
                         real_path = actual_path if (actual_path and os.path.exists(actual_path)) else full_path
 
-                    # On Android, if file is inside private storage, copy to public Downloads so player has full access
-                    if IS_ANDROID and "android/data" in real_path.lower() and os.path.exists(real_path):
-                        try:
-                            pub_dir = engine.get_public_download_dir()
-                            if pub_dir and os.path.isdir(pub_dir):
-                                pub_dest = os.path.join(pub_dir, os.path.basename(real_path))
-                                if not os.path.exists(pub_dest):
-                                    shutil.copy2(real_path, pub_dest)
-                                if os.path.exists(pub_dest):
-                                    real_path = pub_dest
-                        except Exception:
-                            pass
+                    if real_path and os.path.exists(real_path):
+                        mime_type = "video/mp4" if is_video else ("audio/mp4" if self.selected_format == "m4a" else "audio/mpeg")
+                        final_dest = engine.save_file_to_destination(
+                            real_path,
+                            dest_target,
+                            os.path.basename(real_path),
+                            mime_type
+                        )
+                    else:
+                        final_dest = real_path
 
-                    Clock.schedule_once(lambda dt, n=filename_base, p=real_path: self.on_download_complete(n, p), 0)
+                    Clock.schedule_once(lambda dt, n=filename_base, p=final_dest: self.on_download_complete(n, p), 0)
                 except Exception as e:
                     Clock.schedule_once(lambda dt, n=filename_base, err=str(e): self.on_download_failed(n, err), 0)
 
@@ -1014,7 +1013,7 @@ class HomeScreen(Screen):
                 self.app_ref.manager_screen.mark_completed(name, full_path)
             except Exception:
                 pass
-            if IS_ANDROID and full_path and os.path.exists(full_path):
+            if IS_ANDROID and full_path and not engine.is_saf_uri(full_path) and os.path.exists(full_path):
                 try:
                     MediaScannerConnection = autoclass('android.media.MediaScannerConnection')
                     PythonActivity = autoclass('org.kivy.android.PythonActivity')
@@ -1207,18 +1206,20 @@ class ManagerScreen(Screen):
                 return
             if IS_ANDROID:
                 try:
-                    # If file is trapped in private Android/data, copy to public Downloads so player has full access
-                    if "android/data" in path.lower() and os.path.exists(path):
-                        pub_dir = engine.get_public_download_dir()
-                        if pub_dir and os.path.isdir(pub_dir):
-                            pub_path = os.path.join(pub_dir, os.path.basename(path))
-                            if not os.path.exists(pub_path):
-                                shutil.copy2(path, pub_path)
-                            if os.path.exists(pub_path):
-                                path = pub_path
+                    is_saf = engine.is_saf_uri(path)
+                    if not is_saf:
+                        # If file is trapped in private Android/data, copy to public Downloads so player has full access
+                        if "android/data" in str(path).lower() and os.path.exists(path):
+                            pub_dir = engine.get_public_download_dir()
+                            if pub_dir and os.path.isdir(pub_dir):
+                                pub_path = os.path.join(pub_dir, os.path.basename(path))
+                                if not os.path.exists(pub_path):
+                                    shutil.copy2(path, pub_path)
+                                if os.path.exists(pub_path):
+                                    path = pub_path
 
-                    if not os.path.exists(path):
-                        return
+                        if not os.path.exists(path):
+                            return
 
                     StrictMode = autoclass('android.os.StrictMode')
                     builder = autoclass('android.os.StrictMode$VmPolicy$Builder')()
@@ -1228,48 +1229,57 @@ class ManagerScreen(Screen):
                     currentActivity = PythonActivity.mActivity
                     Intent = autoclass('android.content.Intent')
                     Uri = autoclass('android.net.Uri')
-                    File = autoclass('java.io.File')
-                    file_obj = File(path)
                     
-                    is_video = path.lower().endswith(('.mp4', '.mkv', '.webm', '.avi', '.mov'))
-                    is_audio = path.lower().endswith(('.mp3', '.m4a', '.wav', '.opus', '.aac', '.flac'))
+                    is_video = str(path).lower().endswith(('.mp4', '.mkv', '.webm', '.avi', '.mov')) or "video" in str(path).lower()
+                    is_audio = str(path).lower().endswith(('.mp3', '.m4a', '.wav', '.opus', '.aac', '.flac')) or "audio" in str(path).lower()
                     mime = "video/*" if is_video else ("audio/*" if is_audio else "*/*")
 
-                    # Scan with media scanner so system recognizes it
-                    try:
-                        MediaScannerConnection = autoclass('android.media.MediaScannerConnection')
-                        MediaScannerConnection.scanFile(currentActivity, [path], None, None)
-                    except Exception:
-                        pass
+                    # Case 1: SAF Document URI (content://...)
+                    if is_saf:
+                        target_uri = Uri.parse(str(path))
+                        try:
+                            resolved_mime = currentActivity.getContentResolver().getType(target_uri)
+                            if resolved_mime:
+                                mime = resolved_mime
+                        except Exception:
+                            pass
+                    else:
+                        File = autoclass('java.io.File')
+                        file_obj = File(path)
+                        # Scan with media scanner so system recognizes it
+                        try:
+                            MediaScannerConnection = autoclass('android.media.MediaScannerConnection')
+                            MediaScannerConnection.scanFile(currentActivity, [path], None, None)
+                        except Exception:
+                            pass
 
-                    # Attempt to resolve MediaStore content URI first for clean Android 10+ player support
-                    content_uri = None
-                    try:
-                        MediaStore = autoclass('android.provider.MediaStore')
-                        ContentUris = autoclass('android.content.ContentUris')
-                        table = MediaStore.Video.Media.EXTERNAL_CONTENT_URI if is_video else (
-                            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI if is_audio else MediaStore.Files.getContentUri("external")
-                        )
-                        cursor = currentActivity.getContentResolver().query(
-                            table,
-                            ["_id"],
-                            "_data = ?",
-                            [path],
-                            None
-                        )
-                        if cursor and cursor.moveToFirst():
-                            media_id = cursor.getLong(0)
-                            content_uri = ContentUris.withAppendedId(table, media_id)
-                            cursor.close()
-                    except Exception:
-                        pass
+                        # Attempt to resolve MediaStore content URI first for clean Android 10+ player support
+                        target_uri = None
+                        try:
+                            MediaStore = autoclass('android.provider.MediaStore')
+                            ContentUris = autoclass('android.content.ContentUris')
+                            table = MediaStore.Video.Media.EXTERNAL_CONTENT_URI if is_video else (
+                                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI if is_audio else MediaStore.Files.getContentUri("external")
+                            )
+                            cursor = currentActivity.getContentResolver().query(
+                                table,
+                                ["_id"],
+                                "_data = ?",
+                                [path],
+                                None
+                            )
+                            if cursor and cursor.moveToFirst():
+                                media_id = cursor.getLong(0)
+                                target_uri = ContentUris.withAppendedId(table, media_id)
+                                cursor.close()
+                        except Exception:
+                            pass
+
+                        if not target_uri:
+                            target_uri = Uri.fromFile(file_obj)
 
                     intent = Intent(Intent.ACTION_VIEW)
-                    if content_uri:
-                        intent.setDataAndType(content_uri, mime)
-                    else:
-                        intent.setDataAndType(Uri.fromFile(file_obj), mime)
-
+                    intent.setDataAndType(target_uri, mime)
                     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     
@@ -1292,9 +1302,7 @@ class ManagerScreen(Screen):
 
     def open_folder(self, path):
         try:
-            folder = os.path.dirname(path) if (path and os.path.isfile(path)) else (path or engine.get_default_download_dir())
-            if not os.path.exists(folder):
-                folder = engine.get_default_download_dir()
+            folder = path or engine.get_default_download_dir()
 
             if IS_ANDROID:
                 try:
@@ -1304,8 +1312,24 @@ class ManagerScreen(Screen):
                     Uri = autoclass('android.net.Uri')
                     DownloadManager = autoclass('android.app.DownloadManager')
 
-                    # Priority 1: If folder is Downloads or public storage, use system DownloadManager intent
-                    if "download" in folder.lower():
+                    # Case 1: SAF Tree URI (content://...)
+                    if engine.is_saf_uri(folder):
+                        try:
+                            DocumentsContract = autoclass('android.provider.DocumentsContract')
+                            tree_uri = Uri.parse(str(folder))
+                            doc_id = DocumentsContract.getTreeDocumentId(tree_uri)
+                            folder_doc_uri = DocumentsContract.buildDocumentUriUsingTree(tree_uri, doc_id)
+                            intent = Intent(Intent.ACTION_VIEW)
+                            intent.setDataAndType(folder_doc_uri, "vnd.android.document/directory")
+                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            currentActivity.startActivity(intent)
+                            return
+                        except Exception:
+                            pass
+
+                    # Case 2: If folder is Downloads or public storage, use system DownloadManager intent
+                    if "download" in str(folder).lower():
                         try:
                             intent = Intent(DownloadManager.ACTION_VIEW_DOWNLOADS)
                             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -1314,9 +1338,9 @@ class ManagerScreen(Screen):
                         except Exception:
                             pass
 
-                    # Priority 2: Use DocumentsContract directory view
+                    # Case 3: Use DocumentsContract directory view
                     try:
-                        rel_doc = folder.replace("/storage/emulated/0/", "").strip("/")
+                        rel_doc = str(folder).replace("/storage/emulated/0/", "").strip("/")
                         doc_uri = Uri.parse(f"content://com.android.externalstorage.documents/document/primary:{rel_doc}")
                         intent = Intent(Intent.ACTION_VIEW)
                         intent.setDataAndType(doc_uri, "vnd.android.document/directory")
@@ -1413,7 +1437,7 @@ class SettingsScreen(Screen):
 
         current_dest = self.cfg.get("download_dir", engine.get_default_download_dir())
         self.lbl_active_path = TextInput(
-            text=current_dest,
+            text=engine.uri_to_display_name(current_dest),
             font_name=FONT_FAMILY,
             font_size="12.5sp",
             readonly=True,
@@ -1476,7 +1500,7 @@ class SettingsScreen(Screen):
         verified = engine.ensure_valid_download_dir(new_path)
         self.cfg["download_dir"] = verified
         engine.save_settings(self.cfg)
-        self.lbl_active_path.text = verified
+        self.lbl_active_path.text = engine.uri_to_display_name(verified)
 
     def restore_default(self, *args):
         pub = engine.get_default_download_dir()
@@ -1639,22 +1663,8 @@ class UniversalDownloaderMobileApp(App):
                         PythonActivity.mActivity.getContentResolver().takePersistableUriPermission(uri, takeFlags)
                     except Exception:
                         pass
-                    resolved_path = engine.uri_to_path(uri)
-                    if resolved_path:
-                        verified = engine.ensure_valid_download_dir(resolved_path)
-                        if verified == resolved_path:
-                            Clock.schedule_once(lambda dt: self.settings_screen.set_active_path(verified), 0)
-                        else:
-                            def notify_restricted(dt):
-                                self.settings_screen.set_active_path(verified)
-                                self.settings_screen.lbl_active_path.text = f"{verified} (Default: selected folder restricted by Android)"
-                            Clock.schedule_once(notify_restricted, 0)
-                    else:
-                        pub = engine.get_default_download_dir()
-                        def notify_unresolved(dt):
-                            self.settings_screen.set_active_path(pub)
-                            self.settings_screen.lbl_active_path.text = f"{pub} (SAF URI not direct-filesystem writable)"
-                        Clock.schedule_once(notify_unresolved, 0)
+                    uri_str = str(uri.toString())
+                    Clock.schedule_once(lambda dt: self.settings_screen.set_active_path(uri_str), 0)
             except Exception:
                 pass
 

@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import unittest
+import configparser
 from unittest.mock import patch, MagicMock
 import tempfile
 import zipfile
@@ -10,17 +11,12 @@ import zipfile
 # Dynamic Repository Root and Android App Path Discovery (Portable)
 # ---------------------------------------------------------------------------
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-# If tests is inside repo root:
+# The repository root directly contains main.py, downloader_engine.py, buildozer.spec, requirements.txt
 REPO_ROOT = os.path.abspath(os.path.join(CURRENT_DIR, ".."))
-if os.path.exists(os.path.join(REPO_ROOT, "android_app", "downloader_engine.py")):
-    ANDROID_DIR = os.path.join(REPO_ROOT, "android_app")
-elif os.path.exists(os.path.join(CURRENT_DIR, "..", "downloader_engine.py")):
-    ANDROID_DIR = os.path.abspath(os.path.join(CURRENT_DIR, ".."))
-    REPO_ROOT = ANDROID_DIR
-else:
-    raise RuntimeError(f"Could not locate android_app directory relative to {__file__}")
+if not os.path.exists(os.path.join(REPO_ROOT, "downloader_engine.py")):
+    raise RuntimeError(f"Could not locate downloader_engine.py at repository root {REPO_ROOT}")
 
-sys.path.insert(0, ANDROID_DIR)
+sys.path.insert(0, REPO_ROOT)
 import downloader_engine as engine
 
 
@@ -91,8 +87,8 @@ class TestTlsSecurityAndConfiguration(unittest.TestCase):
 
     def test_no_nocheckcertificate_in_codebase(self):
         for fname in ["downloader_engine.py", "main.py"]:
-            fpath = os.path.join(ANDROID_DIR, fname)
-            self.assertTrue(os.path.exists(fpath), f"File {fname} must exist in {ANDROID_DIR}")
+            fpath = os.path.join(REPO_ROOT, fname)
+            self.assertTrue(os.path.exists(fpath), f"File {fname} must exist in {REPO_ROOT}")
             with open(fpath, "r", encoding="utf-8") as f:
                 content = f.read()
                 self.assertNotIn("nocheckcertificate", content, f"Insecure 'nocheckcertificate' found in {fname}")
@@ -269,28 +265,35 @@ class TestBuildozerAndWorkflowPaths(unittest.TestCase):
     """Verify Buildozer specification and GitHub Actions workflow configuration."""
 
     def test_buildozer_specification_integrity(self):
-        spec_path = os.path.join(ANDROID_DIR, "buildozer.spec")
-        self.assertTrue(os.path.exists(spec_path), f"buildozer.spec must exist at {spec_path}")
+        spec_path = os.path.join(REPO_ROOT, "buildozer.spec")
+        self.assertTrue(os.path.exists(spec_path), f"buildozer.spec must exist at root {spec_path}")
 
-        with open(spec_path, "r", encoding="utf-8") as f:
-            spec = f.read()
+        config = configparser.ConfigParser()
+        config.read(spec_path, encoding="utf-8")
+        self.assertTrue(config.has_section("app"), "buildozer.spec must contain [app] section")
 
+        app = config["app"]
         # Architecture & IDs
-        self.assertIn("package.name = universaldownloader", spec)
-        self.assertIn("package.domain = com.universalmedia", spec)
-        self.assertIn("version = 1.1.0", spec)
+        self.assertEqual(app.get("package.name"), "universaldownloader")
+        self.assertEqual(app.get("package.domain"), "com.universalmedia")
+        self.assertEqual(app.get("version"), "1.1.0")
+        self.assertEqual(app.get("source.dir"), ".")
 
-        # Target API compliance (October 2026: targetApi >= 34)
-        self.assertIn("android.api = 34", spec)
-        self.assertIn("android.sdk = 34", spec)
-        self.assertIn("android.minapi = 21", spec)
+        # Target API compliance: dynamically verify target API requirement >= 34
+        api = int(app.get("android.api", "0"))
+        sdk = int(app.get("android.sdk", "0"))
+        minapi = int(app.get("android.minapi", "0"))
+        self.assertGreaterEqual(api, 34, f"Target Android API must be >= 34 to satisfy Google Play requirements (found {api})")
+        self.assertGreaterEqual(sdk, 34, f"Android SDK must be >= 34 (found {sdk})")
+        self.assertGreaterEqual(minapi, 21, f"Minimum API must support modern Android (found {minapi})")
 
         # Least-privilege permissions (zero media permissions)
-        self.assertIn("android.permissions = INTERNET,ACCESS_NETWORK_STATE", spec)
-        self.assertNotIn("READ_MEDIA_VIDEO", spec)
-        self.assertNotIn("READ_MEDIA_AUDIO", spec)
-        self.assertNotIn("WRITE_EXTERNAL_STORAGE", spec)
-        self.assertNotIn("READ_EXTERNAL_STORAGE", spec)
+        raw_perms = app.get("android.permissions", "")
+        perms = [p.strip() for p in raw_perms.split(",") if p.strip()]
+        self.assertIn("INTERNET", perms)
+        self.assertIn("ACCESS_NETWORK_STATE", perms)
+        for forbidden in ["READ_MEDIA_VIDEO", "READ_MEDIA_AUDIO", "READ_MEDIA_IMAGES", "WRITE_EXTERNAL_STORAGE", "READ_EXTERNAL_STORAGE", "MANAGE_EXTERNAL_STORAGE"]:
+            self.assertNotIn(forbidden, perms, f"Unnecessary storage permission '{forbidden}' detected in buildozer.spec")
 
     def test_github_workflow_configuration_integrity(self):
         wf_path = os.path.join(REPO_ROOT, ".github", "workflows", "build_apk.yml")
@@ -299,20 +302,37 @@ class TestBuildozerAndWorkflowPaths(unittest.TestCase):
         with open(wf_path, "r", encoding="utf-8") as f:
             wf = f.read()
 
-        # Verify triggers cover android_app, tests, and workflow itself
-        self.assertIn("android_app/**", wf)
+        # Verify triggers cover repository root files, tests, and workflow itself
+        self.assertIn("main.py", wf)
+        self.assertIn("buildozer.spec", wf)
+        self.assertIn("requirements.txt", wf)
         self.assertIn("tests/**", wf)
         self.assertIn(".github/workflows/build_apk.yml", wf)
+
+        # Verify obsolete android_app/ directory references are removed
+        self.assertNotIn("android_app/**", wf, "Obsolete 'android_app/**' trigger path found in workflow")
+        self.assertNotIn("working-directory: ./android_app", wf, "Obsolete working directory './android_app' found in workflow")
+        self.assertNotIn("android_app/bin", wf, "Obsolete 'android_app/bin' path found in workflow")
+        self.assertNotIn("android_app/requirements.txt", wf, "Obsolete 'android_app/requirements.txt' path found in workflow")
 
         # Verify test job runs regression tests before building APK
         self.assertIn("test:", wf)
         self.assertIn("needs: test", wf)
         self.assertIn("python -m unittest discover", wf)
 
-        # Verify separation of debug and release modes
-        self.assertIn("build_mode", wf)
+        # Verify build modes and commands
         self.assertIn("buildozer -v android release", wf)
         self.assertIn("buildozer -v android debug", wf)
+
+        # Verify fresh APK build and cleanup of old artifacts
+        self.assertIn("rm -rf bin dist_apk", wf)
+
+        # Verify apksigner verify check to prevent double-signing
+        self.assertTrue("apksigner verify" in wf or "$APKSIGNER verify" in wf, "Workflow must verify APK signature with apksigner")
+
+        # Verify default restricted permissions
+        self.assertIn("permissions:", wf)
+        self.assertIn("contents: read", wf)
 
 
 # ===========================================================================
@@ -349,7 +369,6 @@ class TestSecretHygieneAndArtifactIntegrity(unittest.TestCase):
     """Verify no keystores or passwords are committed to Git or present in source archives."""
 
     def test_no_keystore_in_git_tracked_files(self):
-        # Scan git tracked files
         import subprocess
         res = subprocess.run(["git", "-C", REPO_ROOT, "ls-files"], capture_output=True, text=True)
         if res.returncode == 0:
@@ -371,10 +390,25 @@ class TestSecretHygieneAndArtifactIntegrity(unittest.TestCase):
 class TestStorageDestinationAndUriHandling(unittest.TestCase):
     """Verify Android SAF URI parsing, path traversal protection, and storage destination validation."""
 
-    def test_uri_to_path_primary_storage(self):
-        uri = "content://com.android.externalstorage.documents/tree/primary%3ADownload"
-        path = engine.uri_to_path(uri)
-        self.assertEqual(path, "/storage/emulated/0/Download")
+    def test_is_saf_uri_detection(self):
+        self.assertTrue(engine.is_saf_uri("content://com.android.externalstorage.documents/tree/primary%3ADownload"))
+        self.assertTrue(engine.is_saf_uri("content://media/external/images/media/123"))
+        self.assertFalse(engine.is_saf_uri("/storage/emulated/0/Download"))
+        self.assertFalse(engine.is_saf_uri("C:\\Users\\User\\Downloads"))
+        self.assertFalse(engine.is_saf_uri(None))
+
+    def test_ensure_valid_download_dir_preserves_saf_uri(self):
+        saf_uri = "content://com.android.externalstorage.documents/tree/primary%3AMusic"
+        result = engine.ensure_valid_download_dir(saf_uri)
+        self.assertEqual(result, saf_uri, "ensure_valid_download_dir must preserve SAF URIs without attempting filesystem operations")
+
+    def test_uri_to_display_name_formatting(self):
+        # SAF URIs formatted for user display
+        self.assertEqual(engine.uri_to_display_name("content://com.android.externalstorage.documents/tree/primary%3ADownload"), "Selected Folder: Download")
+        self.assertEqual(engine.uri_to_display_name("content://com.android.externalstorage.documents/tree/primary%3AMusic%2FRock"), "Selected Folder: Music/Rock")
+        # Standard filesystem paths
+        self.assertEqual(engine.uri_to_display_name("/storage/emulated/0/Download"), "/storage/emulated/0/Download")
+        self.assertEqual(engine.uri_to_display_name(None), "Default: Downloads")
 
     def test_uri_to_path_traversal_prevention(self):
         # Attacker crafts primary URI with directory traversal
@@ -384,16 +418,25 @@ class TestStorageDestinationAndUriHandling(unittest.TestCase):
         self.assertTrue(path.startswith("/storage/emulated/0"))
         self.assertNotIn("system/bin", path)
 
-    def test_uri_to_path_secondary_sd_card(self):
-        uri = "content://com.android.externalstorage.documents/tree/9C33-6BBD%3AMedia%2FVideo"
-        path = engine.uri_to_path(uri)
-        self.assertEqual(path, "/storage/9C33-6BBD/Media/Video")
-
     def test_ensure_valid_download_dir_writable(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             verified = engine.ensure_valid_download_dir(tmpdir)
             self.assertEqual(os.path.normpath(verified), os.path.normpath(tmpdir))
             self.assertTrue(os.path.isdir(verified))
+
+    def test_save_file_to_destination_filesystem(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            staging_file = os.path.join(tmpdir, "staging_test.mp4")
+            with open(staging_file, "w") as f:
+                f.write("mock media content")
+
+            dest_folder = os.path.join(tmpdir, "dest")
+            os.makedirs(dest_folder, exist_ok=True)
+
+            final_path = engine.save_file_to_destination(staging_file, dest_folder, "test_track.mp4")
+            self.assertTrue(os.path.exists(final_path))
+            self.assertEqual(os.path.basename(final_path), "test_track.mp4")
+            self.assertFalse(os.path.exists(staging_file), "Staging file should be moved/cleaned up")
 
 
 # ===========================================================================

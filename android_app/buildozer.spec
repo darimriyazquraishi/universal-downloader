@@ -18,6 +18,12 @@ source.include_exts = py,png,jpg,ttf,json,xml
 # (list) List of inclusions using pattern matching
 source.include_patterns = assets/*,assets/fonts/*
 
+# (list) List of directory to exclude (let empty to not exclude anything)
+source.exclude_dirs = tests, bin, .buildozer, build, dist, static, .github, android_app, venv_android
+
+# (list) List of exclusions using pattern matching
+source.exclude_patterns = *.spec, *.exe, *.bat, gui_app.py, server.py, build_exe.py, requirements-desktop.txt, *.keystore, *.jks, *.p12, *.key
+
 # (str) Icon of the application
 icon.filename = %(source.dir)s/assets/icon.png
 
@@ -28,13 +34,12 @@ presplash.filename = %(source.dir)s/assets/icon.png
 version = 1.1.0
 
 # (list) Application requirements
-# comma separated e.g. requirements = sqlite3,kivy
 requirements = python3,kivy,openssl,yt-dlp,requests,certifi,mutagen,urllib3,charset-normalizer
 
 # (str) Supported orientation (one of landscape, sensorLandscape, portrait or all)
 orientation = portrait
 
-# (list) Permissions
+# (list) Permissions (least-privilege: zero invasive media permissions)
 android.permissions = INTERNET,ACCESS_NETWORK_STATE
 
 # (str) Format of artifact to build (apk, aab)
@@ -43,14 +48,14 @@ android.release_artifact = apk
 # (bool) Automatically accept SDK license agreements
 android.accept_sdk_license = True
 
-# (int) Target Android API, should be as high as possible.
-android.api = 34
+# (int) Target Android API, aligned with Google Play requirements (API 35: Android 15)
+android.api = 35
 
-# (int) Minimum API your APK / AAB will support.
+# (int) Minimum API your APK / AAB will support (Android 5.0 Lollipop)
 android.minapi = 21
 
 # (int) Android SDK version to use
-android.sdk = 34
+android.sdk = 35
 
 # (str) Android NDK version to use
 android.ndk = 25b
