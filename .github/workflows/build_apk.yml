@@ -162,7 +162,7 @@ jobs:
       - name: Install Buildozer & Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install --upgrade buildozer cython virtualenv "git+https://github.com/kivy/python-for-android.git"
+          pip install buildozer==1.6.0 cython==0.29.37 virtualenv==21.14.8 python-for-android==2026.5.9
 
       - name: Determine Build Type and Extract Release Configuration
         id: mode
@@ -259,10 +259,29 @@ jobs:
           TRUSTED_CERT_SECRET: ${{ secrets.RELEASE_CERT_SHA256 }}
           APP_VERSION: ${{ steps.mode.outputs.app_version }}
         run: |
-          APKSIGNER=$(find $ANDROID_HOME/build-tools -name apksigner | sort -V | tail -n 1)
-          ZIPALIGN=$(find $ANDROID_HOME/build-tools -name zipalign | sort -V | tail -n 1)
-          echo "Found apksigner at: $APKSIGNER"
-          echo "Found zipalign at: $ZIPALIGN"
+          # 1. Require inspection tools (apksigner, zipalign, aapt) to be present and executable
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -n 1)
+          if [ -z "$APKSIGNER" ] || [ ! -x "$APKSIGNER" ]; then
+            echo "::error::Required inspection tool 'apksigner' not found in $ANDROID_HOME/build-tools!"
+            exit 1
+          fi
+
+          ZIPALIGN=$(find "$ANDROID_HOME/build-tools" -name zipalign | sort -V | tail -n 1)
+          if [ -z "$ZIPALIGN" ] || [ ! -x "$ZIPALIGN" ]; then
+            echo "::error::Required inspection tool 'zipalign' not found in $ANDROID_HOME/build-tools!"
+            exit 1
+          fi
+
+          AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt | sort -V | tail -n 1)
+          if [ -z "$AAPT" ] || [ ! -x "$AAPT" ]; then
+            echo "::error::Required inspection tool 'aapt' not found in $ANDROID_HOME/build-tools!"
+            exit 1
+          fi
+
+          echo "Verified required inspection tools are present:"
+          echo "  - apksigner: $APKSIGNER"
+          echo "  - zipalign:  $ZIPALIGN"
+          echo "  - aapt:      $AAPT"
 
           RELEASE_APKS=(bin/*.apk)
           if [ ! -f "${RELEASE_APKS[0]}" ]; then
@@ -383,18 +402,40 @@ jobs:
           APK_SHA=$(sha256sum "$FINAL_APK" | awk '{print $1}')
           echo "APK SHA-256: $APK_SHA"
 
-          # Verify compiled APK manifest (targetSdkVersion 36)
-          AAPT=$(find $ANDROID_HOME/build-tools -name aapt | sort -V | tail -n 1)
-          if [ -x "$AAPT" ]; then
-            echo "Inspecting compiled APK manifest via aapt..."
-            "$AAPT" dump badging "$FINAL_APK" > /tmp/apk_badging.txt
-            if ! grep -q "targetSdkVersion:'36'" /tmp/apk_badging.txt; then
-              echo "::error::Compiled APK does not target API 36!"
-              cat /tmp/apk_badging.txt
-              exit 1
-            fi
-            echo "[OK] Compiled APK verified targeting Android API 36."
+          # 2. Verify APK alignment before publishing
+          echo "Verifying APK 4-byte page alignment..."
+          if ! "$ZIPALIGN" -c -v 4 "$FINAL_APK"; then
+            echo "::error::APK alignment verification failed for $FINAL_APK!"
+            exit 1
           fi
+          echo "[OK] APK 4-byte page alignment verified."
+
+          # 3. Comprehensive badging & manifest verification via aapt
+          echo "Inspecting compiled release APK manifest via aapt..."
+          "$AAPT" dump badging "$FINAL_APK" > /tmp/apk_badging.txt
+
+          # 3a. Verify package ID
+          if ! grep -q "package: name='com.universalmedia.universaldownloader'" /tmp/apk_badging.txt; then
+            echo "::error::Compiled APK package ID does not match 'com.universalmedia.universaldownloader'!"
+            cat /tmp/apk_badging.txt | grep "package:"
+            exit 1
+          fi
+          echo "[OK] Package ID verified: com.universalmedia.universaldownloader"
+
+          # 3b. Verify target SDK
+          if ! grep -q "targetSdkVersion:'36'" /tmp/apk_badging.txt; then
+            echo "::error::Compiled release APK does not target API 36!"
+            cat /tmp/apk_badging.txt | grep "targetSdkVersion"
+            exit 1
+          fi
+          echo "[OK] Target SDK verified: 36"
+
+          # 3c. Verify debuggable status: Production release APK must NOT be debuggable
+          if grep -q "application-debuggable" /tmp/apk_badging.txt; then
+            echo "::error::Production release APK must NOT be debuggable!"
+            exit 1
+          fi
+          echo "[OK] Debuggable status verified: false (production release is not debuggable)"
 
       - name: Build Debug APK with Buildozer
         if: steps.mode.outputs.build_mode == 'debug'
@@ -413,17 +454,23 @@ jobs:
           sha256sum "$DEBUG_APK"
 
           # Verify compiled debug APK manifest
-          AAPT=$(find $ANDROID_HOME/build-tools -name aapt | sort -V | tail -n 1)
-          if [ -x "$AAPT" ]; then
-            echo "Inspecting compiled debug APK manifest..."
-            "$AAPT" dump badging "$DEBUG_APK" > /tmp/debug_badging.txt
-            if ! grep -q "targetSdkVersion:'36'" /tmp/debug_badging.txt; then
-              echo "::error::Compiled APK does not target API 36!"
-              cat /tmp/debug_badging.txt
-              exit 1
-            fi
-            echo "[OK] Compiled debug APK verified targeting Android API 36."
+          AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt | sort -V | tail -n 1)
+          if [ -z "$AAPT" ] || [ ! -x "$AAPT" ]; then
+            echo "::error::Required inspection tool 'aapt' not found in $ANDROID_HOME/build-tools!"
+            exit 1
           fi
+          echo "Inspecting compiled debug APK manifest..."
+          "$AAPT" dump badging "$DEBUG_APK" > /tmp/debug_badging.txt
+          if ! grep -q "package: name='com.universalmedia.universaldownloader'" /tmp/debug_badging.txt; then
+            echo "::error::Debug APK package ID does not match 'com.universalmedia.universaldownloader'!"
+            exit 1
+          fi
+          if ! grep -q "targetSdkVersion:'36'" /tmp/debug_badging.txt; then
+            echo "::error::Compiled debug APK does not target API 36!"
+            cat /tmp/debug_badging.txt
+            exit 1
+          fi
+          echo "[OK] Compiled debug APK verified: package=com.universalmedia.universaldownloader, targetSdkVersion=36"
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
@@ -439,8 +486,11 @@ jobs:
     permissions:
       contents: write
     if: >-
-      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.build_type == 'release' && github.event.inputs.publish_release == true)
+      github.event_name != 'pull_request' &&
+      (
+        (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && needs.build-apk.outputs.build_mode == 'release') ||
+        (github.event_name == 'workflow_dispatch' && github.event.inputs.build_type == 'release' && (github.event.inputs.publish_release == true || github.event.inputs.publish_release == 'true'))
+      )
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4

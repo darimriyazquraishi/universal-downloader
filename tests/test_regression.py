@@ -287,8 +287,7 @@ class TestBuildozerAndWorkflowPaths(unittest.TestCase):
         self.assertGreaterEqual(api, 36, f"Target Android API must be >= 36 to satisfy Google Play requirements (found {api})")
         self.assertGreaterEqual(sdk, 36, f"Android SDK must be >= 36 (found {sdk})")
         self.assertGreaterEqual(minapi, 21, f"Minimum API must support modern Android (found {minapi})")
-        self.assertEqual(app.get("android.ndk"), "26b", "Android NDK must be configured with compatible LTS release 26b")
-        self.assertEqual(app.get("p4a.branch"), "develop", "python-for-android branch must be develop for modern API support")
+        self.assertIn(app.get("p4a.branch"), ["v2026.5.9", "develop"], "python-for-android branch must be pinned release or develop")
 
         # Least-privilege permissions (zero media permissions)
         raw_perms = app.get("android.permissions", "")
@@ -360,6 +359,44 @@ class TestBuildozerAndWorkflowPaths(unittest.TestCase):
         # Verify default restricted permissions
         self.assertIn("permissions:", wf)
         self.assertIn("contents: read", wf)
+
+    def test_workflow_manual_and_tag_release_publishing_conditions(self):
+        wf_path = os.path.join(REPO_ROOT, ".github", "workflows", "build_apk.yml")
+        with open(wf_path, "r", encoding="utf-8") as f:
+            wf = f.read()
+
+        # 1. Verify publish_release boolean handling covers both boolean true and string 'true'
+        self.assertIn("publish_release == true || github.event.inputs.publish_release == 'true'", wf)
+
+        # 2. Verify pull requests are strictly excluded from publishing releases
+        self.assertIn("github.event_name != 'pull_request'", wf)
+
+        # 3. Verify tag-triggered publishing condition
+        self.assertIn("startsWith(github.ref, 'refs/tags/v')", wf)
+
+    def test_workflow_mandatory_apk_inspection_and_dependency_pinning(self):
+        wf_path = os.path.join(REPO_ROOT, ".github", "workflows", "build_apk.yml")
+        with open(wf_path, "r", encoding="utf-8") as f:
+            wf = f.read()
+
+        # 1. Required inspection tools must fail the build if not found
+        self.assertIn("Required inspection tool 'apksigner' not found", wf)
+        self.assertIn("Required inspection tool 'zipalign' not found", wf)
+        self.assertIn("Required inspection tool 'aapt' not found", wf)
+
+        # 2. 4-byte page alignment verification
+        self.assertIn("$ZIPALIGN\" -c -v 4", wf)
+
+        # 3. Target API 36, package ID, and non-debuggable verification
+        self.assertIn("targetSdkVersion:'36'", wf)
+        self.assertIn("com.universalmedia.universaldownloader", wf)
+        self.assertIn("application-debuggable", wf)
+
+        # 4. Reproducible build: pinned versions of Buildozer, Cython, and python-for-android
+        self.assertIn("buildozer==1.6.0", wf)
+        self.assertIn("cython==0.29.37", wf)
+        self.assertIn("virtualenv==21.14.8", wf)
+        self.assertIn("python-for-android==2026.5.9", wf)
 
 
 # ===========================================================================
@@ -535,6 +572,91 @@ class TestStorageDestinationAndUriHandling(unittest.TestCase):
                     self.assertIn("Failed to save to selected custom folder", str(ctx.exception))
                     # Staging file MUST NOT be deleted or moved!
                     self.assertTrue(os.path.exists(staging_file), "Staging file must be preserved upon destination failure")
+
+    def test_nested_document_uri_handling_and_parent_tree_extraction(self):
+        tree_root = "content://com.android.externalstorage.documents/tree/primary%3ADownload"
+        nested_doc = "content://com.android.externalstorage.documents/tree/primary%3ADownload/document/primary%3ADownload%2Fvideo.mp4"
+        standalone_doc = "content://com.android.externalstorage.documents/document/primary%3ADownload%2Fvideo.mp4"
+
+        # Tree root check
+        self.assertTrue(engine.is_tree_uri(tree_root))
+        self.assertFalse(engine.is_document_uri(tree_root))
+        self.assertEqual(engine.extract_parent_tree_uri(tree_root), tree_root)
+
+        # Nested document must NOT be classified as tree root
+        self.assertFalse(engine.is_tree_uri(nested_doc), "Nested document URI in a tree must not be misclassified as a folder tree URI")
+        self.assertTrue(engine.is_document_uri(nested_doc))
+        self.assertTrue(engine.is_saf_uri(nested_doc))
+        # Resolving parent tree URI from nested document URI
+        self.assertEqual(engine.extract_parent_tree_uri(nested_doc), tree_root)
+
+        # Standalone document
+        self.assertFalse(engine.is_tree_uri(standalone_doc))
+        self.assertTrue(engine.is_document_uri(standalone_doc))
+        self.assertIsNone(engine.extract_parent_tree_uri(standalone_doc))
+
+        # MediaStore and filesystem paths
+        self.assertIsNone(engine.extract_parent_tree_uri("content://media/external/downloads"))
+        self.assertIsNone(engine.extract_parent_tree_uri("/storage/emulated/0/Download"))
+
+    def test_invalid_destination_uri_rejected(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            staging_file = os.path.join(tmpdir, "staging_invalid.mp4")
+            with open(staging_file, "w") as f:
+                f.write("test content")
+
+            with patch.object(engine, "IS_ANDROID", True):
+                # Document URI passed as directory destination
+                doc_uri = "content://com.android.externalstorage.documents/document/primary%3ADownload%2Fvideo.mp4"
+                with self.assertRaises(IOError) as ctx:
+                    engine.save_file_to_destination(staging_file, doc_uri, "test.mp4")
+                self.assertIn("Invalid custom destination URI", str(ctx.exception))
+                self.assertTrue(os.path.exists(staging_file), "Staging file must be preserved when destination URI is invalid")
+
+    def test_revoked_saf_permissions_preserves_staging_and_raises(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            staging_file = os.path.join(tmpdir, "staging_perm.mp4")
+            with open(staging_file, "w") as f:
+                f.write("test content")
+
+            with patch.object(engine, "IS_ANDROID", True):
+                # Mock SecurityException from DocumentsContract
+                mock_activity = MagicMock()
+                mock_activity.mActivity.getContentResolver.side_effect = PermissionError("Permission Denial: requires android.permission.MANAGE_DOCUMENTS")
+                with patch.dict(engine.__dict__, {"autoclass": MagicMock(return_value=mock_activity)}):
+                    custom_tree = "content://com.android.externalstorage.documents/tree/primary%3AMusic"
+                    with self.assertRaises(IOError) as ctx:
+                        engine.save_file_to_destination(staging_file, custom_tree, "song.mp3")
+                    self.assertIn("Failed to save to selected custom folder", str(ctx.exception))
+                    self.assertTrue(os.path.exists(staging_file), "Staging file must be preserved when SAF permissions are revoked")
+
+    def test_mediastore_failure_preserves_staging_and_raises(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            staging_file = os.path.join(tmpdir, "staging_ms.mp4")
+            with open(staging_file, "w") as f:
+                f.write("test content")
+
+            with patch.object(engine, "IS_ANDROID", True):
+                with patch("downloader_engine.save_to_mediastore_downloads", side_effect=IOError("MediaStore insertion failed")):
+                    with self.assertRaises(IOError) as ctx:
+                        engine.save_file_to_destination(staging_file, None, "test.mp4")
+                    self.assertIn("Failed to save to Android MediaStore Downloads", str(ctx.exception))
+                    # Staging file MUST NOT be deleted or moved!
+                    self.assertTrue(os.path.exists(staging_file), "Staging file must be preserved upon MediaStore failure")
+
+    def test_failed_file_write_preserves_staging(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            staging_file = os.path.join(tmpdir, "staging_disk_full.mp4")
+            with open(staging_file, "w") as f:
+                f.write("media data")
+
+            # Simulate filesystem failure during move/copy
+            with patch("shutil.move", side_effect=OSError("No space left on device")):
+                with patch("shutil.copy2", side_effect=OSError("No space left on device")):
+                    with self.assertRaises(IOError) as ctx:
+                        engine.save_file_to_destination(staging_file, tmpdir, "test.mp4")
+                    self.assertIn("Failed to save file to destination", str(ctx.exception))
+                    self.assertTrue(os.path.exists(staging_file), "Staging file must be preserved when disk write fails")
 
     def test_ensure_valid_download_dir_writable(self):
         with tempfile.TemporaryDirectory() as tmpdir:

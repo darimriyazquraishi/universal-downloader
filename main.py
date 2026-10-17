@@ -1215,22 +1215,8 @@ class ManagerScreen(Screen):
                 try:
                     is_content = engine.is_content_uri(path)
                     if not is_content:
-                        # If file is trapped in private Android/data, copy to public Downloads so player has full access
-                        if "android/data" in str(path).lower() and os.path.exists(path):
-                            pub_dir = engine.get_public_download_dir()
-                            if pub_dir and os.path.isdir(pub_dir):
-                                pub_path = os.path.join(pub_dir, os.path.basename(path))
-                                if not os.path.exists(pub_path):
-                                    shutil.copy2(path, pub_path)
-                                if os.path.exists(pub_path):
-                                    path = pub_path
-
                         if not os.path.exists(path):
                             return
-
-                    StrictMode = autoclass('android.os.StrictMode')
-                    builder = autoclass('android.os.StrictMode$VmPolicy$Builder')()
-                    StrictMode.setVmPolicy(builder.build())
 
                     PythonActivity = autoclass('org.kivy.android.PythonActivity')
                     currentActivity = PythonActivity.mActivity
@@ -1241,7 +1227,9 @@ class ManagerScreen(Screen):
                     is_audio = str(path).lower().endswith(('.mp3', '.m4a', '.wav', '.opus', '.aac', '.flac')) or "audio" in str(path).lower()
                     mime = "video/*" if is_video else ("audio/*" if is_audio else "*/*")
 
-                    # Case 1: Content URI (SAF document or MediaStore item)
+                    target_uri = None
+
+                    # Case 1: Already an Android content URI (MediaStore item or SAF document URI)
                     if is_content:
                         target_uri = Uri.parse(str(path))
                         try:
@@ -1251,17 +1239,8 @@ class ManagerScreen(Screen):
                         except Exception:
                             pass
                     else:
-                        File = autoclass('java.io.File')
-                        file_obj = File(path)
-                        # Scan with media scanner so system recognizes it
-                        try:
-                            MediaScannerConnection = autoclass('android.media.MediaScannerConnection')
-                            MediaScannerConnection.scanFile(currentActivity, [path], None, None)
-                        except Exception:
-                            pass
-
-                        # Attempt to resolve MediaStore content URI first for clean Android 10+ player support
-                        target_uri = None
+                        # Case 2: Filesystem path - resolve content URI via MediaStore
+                        # Security Rule: Never construct file:// intents for external apps or use permissive StrictMode
                         try:
                             MediaStore = autoclass('android.provider.MediaStore')
                             ContentUris = autoclass('android.content.ContentUris')
@@ -1282,8 +1261,17 @@ class ManagerScreen(Screen):
                         except Exception:
                             pass
 
+                        # If not yet indexed in MediaStore, trigger a media scan to index it
                         if not target_uri:
-                            target_uri = Uri.fromFile(file_obj)
+                            try:
+                                MediaScannerConnection = autoclass('android.media.MediaScannerConnection')
+                                MediaScannerConnection.scanFile(currentActivity, [path], [mime], None)
+                            except Exception:
+                                pass
+
+                    if not target_uri:
+                        Logger.warning(f"UniversalDownloader: Content URI could not be resolved for '{path}'.")
+                        return
 
                     intent = Intent(Intent.ACTION_VIEW)
                     intent.setDataAndType(target_uri, mime)
@@ -1293,8 +1281,8 @@ class ManagerScreen(Screen):
                     chooser = Intent.createChooser(intent, "Play media with...")
                     chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     currentActivity.startActivity(chooser)
-                except Exception:
-                    pass
+                except Exception as e:
+                    Logger.error(f"UniversalDownloader: Failed to open file: {e}")
             else:
                 if not os.path.exists(path):
                     return
@@ -1312,18 +1300,26 @@ class ManagerScreen(Screen):
             cfg = engine.load_settings()
             default_dir = cfg.get("download_dir", engine.get_default_download_dir())
 
-            if path and not engine.is_content_uri(path):
-                if os.path.isfile(path):
-                    folder = os.path.dirname(path)
-                elif os.path.isdir(path):
-                    folder = path
-                else:
-                    folder = default_dir
-            elif path and engine.is_tree_uri(path):
-                folder = path
-            elif path and engine.is_content_uri(path):
-                folder = default_dir
-            else:
+            # 1. Resolve target folder from path or settings
+            folder = None
+            if path:
+                if engine.is_tree_uri(path):
+                    folder = str(path)
+                elif engine.is_document_uri(path):
+                    # For completed downloads stored through SAF, extract containing tree URI
+                    parent_tree = engine.extract_parent_tree_uri(path)
+                    folder = parent_tree if parent_tree else default_dir
+                elif engine.is_mediastore_uri(path):
+                    folder = "content://media/external/downloads"
+                elif not engine.is_content_uri(path):
+                    if os.path.isfile(path):
+                        folder = os.path.dirname(path)
+                    elif os.path.isdir(path):
+                        folder = path
+                    else:
+                        folder = default_dir
+
+            if not folder:
                 folder = default_dir
 
             if IS_ANDROID:
@@ -1334,7 +1330,7 @@ class ManagerScreen(Screen):
                     Uri = autoclass('android.net.Uri')
                     DownloadManager = autoclass('android.app.DownloadManager')
 
-                    # Case 1: SAF Tree URI (user-selected folder via ACTION_OPEN_DOCUMENT_TREE)
+                    # Case 1: SAF Tree URI (user-selected folder or parent folder of completed SAF download)
                     if engine.is_tree_uri(folder):
                         try:
                             DocumentsContract = autoclass('android.provider.DocumentsContract')
@@ -1350,43 +1346,16 @@ class ManagerScreen(Screen):
                         except Exception:
                             pass
 
-                    # Case 2: MediaStore or standard public downloads
-                    if engine.is_mediastore_uri(folder) or "download" in str(folder).lower():
-                        try:
-                            intent = Intent(DownloadManager.ACTION_VIEW_DOWNLOADS)
-                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            currentActivity.startActivity(intent)
-                            return
-                        except Exception:
-                            pass
-
-                    # Case 3: Use DocumentsContract directory view
+                    # Case 2: MediaStore or standard public downloads folder
                     try:
-                        rel_doc = str(folder).replace("/storage/emulated/0/", "").strip("/")
-                        doc_uri = Uri.parse(f"content://com.android.externalstorage.documents/document/primary:{rel_doc}")
-                        intent = Intent(Intent.ACTION_VIEW)
-                        intent.setDataAndType(doc_uri, "vnd.android.document/directory")
+                        intent = Intent(DownloadManager.ACTION_VIEW_DOWNLOADS)
                         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                         currentActivity.startActivity(intent)
                         return
                     except Exception:
                         pass
-
-
-                    # Priority 3: Use file explorer intent
-                    StrictMode = autoclass('android.os.StrictMode')
-                    builder = autoclass('android.os.StrictMode$VmPolicy$Builder')()
-                    StrictMode.setVmPolicy(builder.build())
-
-                    intent = Intent(Intent.ACTION_VIEW)
-                    intent.setDataAndType(Uri.parse(f"file://{folder}"), "resource/folder")
-                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    chooser = Intent.createChooser(intent, "Open folder with...")
-                    chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    currentActivity.startActivity(chooser)
-                except Exception:
-                    pass
+                except Exception as e:
+                    Logger.error(f"UniversalDownloader: Failed to open folder: {e}")
             else:
                 if not os.path.exists(folder):
                     try:

@@ -118,32 +118,59 @@ def get_default_download_dir():
         return os.path.normpath(os.path.join(os.path.dirname(__file__), "downloads"))
 
 def is_content_uri(path_or_uri):
-    """Check if target string is an Android content:// URI (SAF tree, document, or MediaStore)."""
+    """Check if target string is any Android content:// URI."""
     if not path_or_uri:
         return False
     return str(path_or_uri).strip().startswith("content://")
 
-def is_tree_uri(path_or_uri):
-    """Check if target string is an Android SAF Tree URI (directory from ACTION_OPEN_DOCUMENT_TREE)."""
+def is_mediastore_uri(path_or_uri):
+    """Check if target string is an Android MediaStore collection or item URI."""
     if not is_content_uri(path_or_uri):
         return False
-    return "/tree/" in str(path_or_uri)
+    return str(path_or_uri).strip().startswith("content://media/")
 
 def is_document_uri(path_or_uri):
-    """Check if target string is an Android SAF Document URI (individual file or directory document)."""
+    """
+    Check if target string is an individual SAF document URI.
+    Matches standalone document URIs ('.../document/...') as well as document
+    URIs nested/generated inside a tree ('.../tree/.../document/...').
+    """
     if not is_content_uri(path_or_uri):
         return False
     return "/document/" in str(path_or_uri)
 
-def is_mediastore_uri(path_or_uri):
-    """Check if target string is an Android MediaStore collection or item URI."""
-    if not path_or_uri:
+def is_tree_uri(path_or_uri):
+    """
+    Check if target string is specifically an Android SAF Tree root URI
+    (directory from ACTION_OPEN_DOCUMENT_TREE) used for folder selection.
+    
+    A document generated inside a tree contains '/document/' and must NOT
+    be misclassified as a folder-selection tree URI.
+    """
+    if not is_content_uri(path_or_uri):
         return False
-    return str(path_or_uri).strip().startswith("content://media/")
+    s = str(path_or_uri)
+    return ("/tree/" in s) and ("/document/" not in s)
 
 def is_saf_uri(path_or_uri):
-    """Check if target string is specifically a Storage Access Framework URI (tree or document)."""
+    """Check if target string is specifically a Storage Access Framework URI (tree root or document)."""
     return is_tree_uri(path_or_uri) or is_document_uri(path_or_uri)
+
+def extract_parent_tree_uri(path_or_uri):
+    """
+    Extract the parent SAF tree URI from a document URI generated inside a tree.
+    Returns the tree URI string if path_or_uri is a nested document URI or tree URI,
+    or None if no tree root can be resolved.
+    """
+    if not is_content_uri(path_or_uri):
+        return None
+    s = str(path_or_uri).strip()
+    if is_tree_uri(s):
+        return s
+    if is_document_uri(s) and "/tree/" in s:
+        # Format: content://authority/tree/<tree_id>/document/<doc_id>
+        return s.split("/document/")[0]
+    return None
 
 def save_to_mediastore_downloads(staging_filepath, display_name, mime_type="video/mp4"):
     """
@@ -291,18 +318,33 @@ def save_file_to_destination(staging_filepath, destination_dir_or_uri, display_n
             # Preserve staging file and raise error to user: DO NOT SILENTLY REDIRECT!
             raise IOError(f"Failed to save to selected custom folder: {e}")
 
-    # Case 2: On Android, shared / default downloads publish via MediaStore
+    # Case 2: On Android, invalid content URI destinations (e.g. document URIs) cannot serve as destination folders
+    if IS_ANDROID and is_content_uri(destination_dir_or_uri) and not is_tree_uri(destination_dir_or_uri) and not is_mediastore_uri(destination_dir_or_uri):
+        raise IOError(f"Invalid custom destination URI '{destination_dir_or_uri}'. Must be a valid SAF folder tree URI.")
+
+    # Case 3: On Android, shared / default downloads publish via MediaStore Downloads
     if IS_ANDROID and (not destination_dir_or_uri or is_mediastore_uri(destination_dir_or_uri) or destination_dir_or_uri == get_default_download_dir()):
         try:
             mediastore_uri = save_to_mediastore_downloads(staging_filepath, display_name, mime_type)
             if mediastore_uri:
                 return mediastore_uri
-        except Exception:
-            pass
+            raise IOError(f"save_to_mediastore_downloads returned empty URI for '{display_name}'")
+        except Exception as e:
+            # Preserve staging file and report clear error: DO NOT SWALLOW OR SILENTLY REDIRECT!
+            raise IOError(f"Failed to save to Android MediaStore Downloads: {e}")
 
-    # Case 3: Standard filesystem destination (desktop simulator or Android app-specific storage)
-    dest_dir = destination_dir_or_uri if (destination_dir_or_uri and not is_content_uri(destination_dir_or_uri)) else get_default_download_dir()
+    # Case 4: Standard filesystem destination (desktop simulator or Android app-specific storage)
+    if is_content_uri(destination_dir_or_uri):
+        raise IOError(f"Unsupported destination content URI: {destination_dir_or_uri}")
+
+    dest_dir = destination_dir_or_uri or get_default_download_dir()
     dest_dir = ensure_valid_download_dir(dest_dir)
+    if not os.path.isdir(dest_dir):
+        try:
+            os.makedirs(dest_dir, exist_ok=True)
+        except Exception as e:
+            raise IOError(f"Destination folder '{dest_dir}' is unavailable and could not be created: {e}")
+
     target_path = os.path.join(dest_dir, display_name)
 
     # Handle overwrite or existing files
@@ -312,12 +354,16 @@ def save_file_to_destination(staging_filepath, destination_dir_or_uri, display_n
 
     try:
         shutil.move(staging_filepath, target_path)
-    except Exception:
-        shutil.copy2(staging_filepath, target_path)
+    except Exception as move_err:
         try:
-            os.remove(staging_filepath)
-        except Exception:
-            pass
+            shutil.copy2(staging_filepath, target_path)
+            try:
+                os.remove(staging_filepath)
+            except Exception:
+                pass
+        except Exception as copy_err:
+            # Preserve staging file and raise error to user: DO NOT SILENTLY DROP OR REDIRECT!
+            raise IOError(f"Failed to save file to destination '{target_path}': {copy_err}")
 
     if IS_ANDROID and os.path.exists(target_path):
         try:
