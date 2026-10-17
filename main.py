@@ -1133,6 +1133,10 @@ class ManagerScreen(Screen):
 
     def add_item(self, name, status, path, fmt, animate=True):
         try:
+            if name in self.items_data:
+                self.mark_completed(name, path)
+                return
+
             if self.lbl_empty in self.list_layout.children:
                 self.list_layout.remove_widget(self.lbl_empty)
 
@@ -1302,7 +1306,20 @@ class ManagerScreen(Screen):
 
     def open_folder(self, path):
         try:
-            folder = path or engine.get_default_download_dir()
+            cfg = engine.load_settings()
+            default_dir = cfg.get("download_dir", engine.get_default_download_dir())
+
+            if path and not engine.is_saf_uri(path):
+                if os.path.isfile(path):
+                    folder = os.path.dirname(path)
+                elif os.path.isdir(path):
+                    folder = path
+                else:
+                    folder = default_dir
+            elif path and engine.is_saf_uri(path):
+                folder = default_dir if engine.is_saf_uri(default_dir) else engine.get_default_download_dir()
+            else:
+                folder = default_dir
 
             if IS_ANDROID:
                 try:
@@ -1365,6 +1382,11 @@ class ManagerScreen(Screen):
                 except Exception:
                     pass
             else:
+                if not os.path.exists(folder):
+                    try:
+                        os.makedirs(folder, exist_ok=True)
+                    except Exception:
+                        pass
                 if sys.platform == "win32":
                     os.startfile(folder)
                 elif sys.platform == "darwin":

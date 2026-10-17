@@ -170,19 +170,25 @@ def save_file_to_destination(staging_filepath, destination_dir_or_uri, display_n
             new_doc_uri = DocumentsContract.createDocument(resolver, parent_doc_uri, mime_type, display_name)
             if new_doc_uri:
                 out_stream = resolver.openOutputStream(new_doc_uri)
-                with open(staging_filepath, "rb") as in_f:
-                    while True:
-                        chunk = in_f.read(65536)
-                        if not chunk:
-                            break
-                        out_stream.write(bytes(chunk))
-                out_stream.flush()
-                out_stream.close()
-                try:
-                    os.remove(staging_filepath)
-                except Exception:
-                    pass
-                return str(new_doc_uri.toString())
+                if out_stream:
+                    try:
+                        with open(staging_filepath, "rb") as in_f:
+                            while True:
+                                chunk = in_f.read(65536)
+                                if not chunk:
+                                    break
+                                out_stream.write(bytes(chunk))
+                        out_stream.flush()
+                    finally:
+                        try:
+                            out_stream.close()
+                        except Exception:
+                            pass
+                    try:
+                        os.remove(staging_filepath)
+                    except Exception:
+                        pass
+                    return str(new_doc_uri.toString())
         except Exception:
             # Fallback to saving in default downloads folder if SAF export fails
             pass
@@ -438,7 +444,16 @@ def save_settings(cfg):
 
 def parse_url_structure(url):
     """Detect if a URL contains a single video, a playlist, or a video within a YouTube Mix/Radio."""
-    u = urllib.parse.urlparse(url)
+    if not url:
+        return {
+            "is_youtube": False,
+            "video_id": None,
+            "playlist_id": None,
+            "is_mix": False,
+            "has_both": False,
+            "clean_video_url": None
+        }
+    u = urllib.parse.urlparse(str(url))
     qs = urllib.parse.parse_qs(u.query)
     is_yt = 'youtube.com' in u.netloc or 'youtu.be' in u.netloc
     
@@ -466,8 +481,10 @@ def parse_url_structure(url):
 
 def clean_url(url, remove_playlist=False):
     """Clean URL by removing tracking params, timestamps, and optionally playlist/mix IDs."""
+    if not url:
+        return ""
     try:
-        u = urllib.parse.urlparse(url)
+        u = urllib.parse.urlparse(str(url))
         qs = urllib.parse.parse_qs(u.query)
         
         # Strip tracking & session params
@@ -518,6 +535,7 @@ def detect_platform(url):
 
 def clean_filename(title, idx, max_len=75):
     """Sanitize title for Android FAT32 / SD Card / internal storage compatibility."""
+    title = str(title or f"Track_{idx:03d}")
     title = unicodedata.normalize('NFKD', title)
     title = title.replace('|', '-').replace('/', '-').replace('\\', '-').replace(':', ' -')
     title = title.replace('?', '').replace('*', '').replace('"', '').replace('<', '').replace('>', '')

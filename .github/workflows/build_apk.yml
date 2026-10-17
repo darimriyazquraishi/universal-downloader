@@ -17,7 +17,7 @@ on:
         default: false
         type: boolean
       release_tag:
-        description: 'Optional custom release tag (e.g. v1.1.0). If empty, a non-colliding build tag is used.'
+        description: 'Optional custom release tag (e.g. v2.0.0). If empty, a non-colliding build tag is used.'
         required: false
         default: ''
         type: string
@@ -231,9 +231,9 @@ jobs:
           echo "Executing final signature verification:"
           $APKSIGNER verify --verbose "$target_apk"
 
-          cp "$target_apk" dist_apk/UniversalDownloader-v1.1.0.apk
-          echo "Final verified release APK: dist_apk/UniversalDownloader-v1.1.0.apk"
-          sha256sum dist_apk/UniversalDownloader-v1.1.0.apk
+          cp "$target_apk" dist_apk/UniversalDownloader-v2.0.0.apk
+          echo "Final verified release APK: dist_apk/UniversalDownloader-v2.0.0.apk"
+          sha256sum dist_apk/UniversalDownloader-v2.0.0.apk
 
       - name: Build Debug APK with Buildozer
         if: steps.mode.outputs.build_mode == 'debug'
@@ -244,9 +244,9 @@ jobs:
             echo "::error::No debug APK produced in bin/ by Buildozer!"
             exit 1
           fi
-          cp "${DEBUG_APKS[0]}" dist_apk/UniversalDownloader-v1.1.0-debug.apk
-          echo "Final debug APK: dist_apk/UniversalDownloader-v1.1.0-debug.apk"
-          sha256sum dist_apk/UniversalDownloader-v1.1.0-debug.apk
+          cp "${DEBUG_APKS[0]}" dist_apk/UniversalDownloader-v2.0.0-debug.apk
+          echo "Final debug APK: dist_apk/UniversalDownloader-v2.0.0-debug.apk"
+          sha256sum dist_apk/UniversalDownloader-v2.0.0-debug.apk
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
@@ -282,7 +282,7 @@ jobs:
           elif [ -n "${{ github.event.inputs.release_tag }}" ]; then
             TAG_NAME="${{ github.event.inputs.release_tag }}"
           else
-            TAG_NAME="v1.1.0-release.build-${{ github.run_number }}"
+            TAG_NAME="v2.0.0-release.build-${{ github.run_number }}"
           fi
           echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
           echo "Target Release Tag: $TAG_NAME"
@@ -293,11 +293,11 @@ jobs:
           tag_name: ${{ steps.release_meta.outputs.tag_name }}
           name: Universal Downloader Android APK ${{ steps.release_meta.outputs.tag_name }}
           body: |
-            ### Universal Downloader for Android - Production Release
+            ### Universal Downloader for Android (v2.0.0) - Production Release
             - **Google Play Target API**: Aligned with Google Play requirements (Target API 35: Android 15).
             - **Cryptographic Signature Verification**: Verified via `apksigner` with release keystore across APK Signature Schemes v1, v2, and v3 under package domain `com.universalmedia`.
             - **Storage Access Framework (SAF) & MediaStore**: Compliant Scoped Storage with least-privilege permissions (`INTERNET`, `ACCESS_NETWORK_STATE`).
             - **Security & Integrity**: Zero debuggable flags (`android:debuggable="false"`), strict TLS verification, and 100% CI automated test coverage.
-          files: dist_apk/UniversalDownloader-v1.1.0.apk
+          files: dist_apk/UniversalDownloader-v2.0.0.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
