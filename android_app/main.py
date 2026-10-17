@@ -1007,7 +1007,10 @@ class HomeScreen(Screen):
             self.lbl_speed.text = "SPEED: --"
             self.lbl_eta.text = "ETA: --"
             try:
-                fmt_tag = "MP4" if full_path.lower().endswith(('.mp4', '.mkv', '.webm')) else "MP3"
+                p_str = str(full_path).lower()
+                n_str = str(name).lower()
+                is_vid = any(p_str.endswith(ext) or n_str.endswith(ext) for ext in ('.mp4', '.mkv', '.webm', '.avi', '.mov')) or getattr(self, 'selected_format', '') == 'video'
+                fmt_tag = "MP4" if is_vid else "MP3"
                 engine.add_to_history(name, full_path, fmt_tag)
                 self.app_ref.manager_screen.add_item(name, "✓ Saved", full_path, fmt_tag)
                 self.app_ref.manager_screen.mark_completed(name, full_path)

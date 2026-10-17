@@ -117,11 +117,79 @@ def get_default_download_dir():
             return os.path.normpath(os.path.join(user_downloads, "Media Downloads"))
         return os.path.normpath(os.path.join(os.path.dirname(__file__), "downloads"))
 
-def is_saf_uri(path_or_uri):
-    """Check if target string is an Android Storage Access Framework content:// URI."""
+def is_content_uri(path_or_uri):
+    """Check if target string is an Android content:// URI (SAF tree, document, or MediaStore)."""
     if not path_or_uri:
         return False
     return str(path_or_uri).strip().startswith("content://")
+
+# Backward-compatible alias for existing callers
+is_saf_uri = is_content_uri
+
+def save_to_mediastore_downloads(staging_filepath, display_name, mime_type="video/mp4"):
+    """
+    Publish completed media file to Android MediaStore Downloads collection.
+    Complies 100% with Android 10+ (API 29 to 36) Scoped Storage without requiring
+    broad storage permissions (WRITE_EXTERNAL_STORAGE / MANAGE_EXTERNAL_STORAGE).
+    Returns the created content:// URI or raises an Exception.
+    """
+    PythonActivity = autoclass('org.kivy.android.PythonActivity')
+    activity = PythonActivity.mActivity
+    resolver = activity.getContentResolver()
+    ContentValues = autoclass('android.content.ContentValues')
+    MediaStore = autoclass('android.provider.MediaStore')
+    Environment = autoclass('android.os.Environment')
+
+    values = ContentValues()
+    values.put(MediaStore.MediaColumns.DISPLAY_NAME, display_name)
+    values.put(MediaStore.MediaColumns.MIME_TYPE, mime_type)
+    values.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+    values.put(MediaStore.MediaColumns.IS_PENDING, 1)
+
+    try:
+        downloads_uri = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+    except Exception:
+        Uri = autoclass('android.net.Uri')
+        downloads_uri = Uri.parse("content://media/external/downloads")
+
+    item_uri = resolver.insert(downloads_uri, values)
+    if not item_uri:
+        raise IOError(f"Failed to create MediaStore entry for {display_name}")
+
+    out_stream = None
+    try:
+        out_stream = resolver.openOutputStream(item_uri)
+        if not out_stream:
+            raise IOError(f"Failed to open output stream for MediaStore URI {item_uri}")
+        with open(staging_filepath, "rb") as in_f:
+            while True:
+                chunk = in_f.read(65536)
+                if not chunk:
+                    break
+                out_stream.write(bytes(chunk))
+        out_stream.flush()
+
+        # Mark item as no longer pending so external player apps, download manager, and gallery see it
+        values.clear()
+        values.put(MediaStore.MediaColumns.IS_PENDING, 0)
+        resolver.update(item_uri, values, None, None)
+        try:
+            os.remove(staging_filepath)
+        except Exception:
+            pass
+        return str(item_uri.toString())
+    except Exception:
+        try:
+            resolver.delete(item_uri, None, None)
+        except Exception:
+            pass
+        raise
+    finally:
+        if out_stream:
+            try:
+                out_stream.close()
+            except Exception:
+                pass
 
 def get_staging_download_dir():
     """Retrieve an always-writable staging directory for progressive downloading & muxing."""
@@ -149,13 +217,14 @@ def get_staging_download_dir():
 def save_file_to_destination(staging_filepath, destination_dir_or_uri, display_name, mime_type="video/mp4"):
     """
     Export completed download from staging path into the final destination.
-    Seamlessly handles both Storage Access Framework (SAF) content:// tree URIs and standard filesystem paths.
+    Seamlessly handles Storage Access Framework (SAF) tree URIs, MediaStore Downloads,
+    and standard filesystem paths.
     """
     if not os.path.exists(staging_filepath):
         raise FileNotFoundError(f"Staged download not found at {staging_filepath}")
 
-    # Case 1: Android Storage Access Framework content:// tree URI
-    if IS_ANDROID and is_saf_uri(destination_dir_or_uri):
+    # Case 1: Android Storage Access Framework content:// tree URI (custom user-selected directory)
+    if IS_ANDROID and is_content_uri(destination_dir_or_uri):
         try:
             PythonActivity = autoclass('org.kivy.android.PythonActivity')
             activity = PythonActivity.mActivity
@@ -163,7 +232,7 @@ def save_file_to_destination(staging_filepath, destination_dir_or_uri, display_n
             Uri = autoclass('android.net.Uri')
             DocumentsContract = autoclass('android.provider.DocumentsContract')
 
-            tree_uri = Uri.parse(destination_dir_or_uri)
+            tree_uri = Uri.parse(str(destination_dir_or_uri))
             doc_id = DocumentsContract.getTreeDocumentId(tree_uri)
             parent_doc_uri = DocumentsContract.buildDocumentUriUsingTree(tree_uri, doc_id)
 
@@ -190,11 +259,20 @@ def save_file_to_destination(staging_filepath, destination_dir_or_uri, display_n
                         pass
                     return str(new_doc_uri.toString())
         except Exception:
-            # Fallback to saving in default downloads folder if SAF export fails
+            # Fallback to MediaStore if SAF document creation fails
             pass
 
-    # Case 2: Standard filesystem destination
-    dest_dir = destination_dir_or_uri if not is_saf_uri(destination_dir_or_uri) else get_default_download_dir()
+    # Case 2: On Android, if destination is standard public downloads (or SAF failed), publish via MediaStore
+    if IS_ANDROID:
+        try:
+            mediastore_uri = save_to_mediastore_downloads(staging_filepath, display_name, mime_type)
+            if mediastore_uri:
+                return mediastore_uri
+        except Exception:
+            pass
+
+    # Case 3: Standard filesystem destination (desktop simulator or Android app-specific storage fallback)
+    dest_dir = destination_dir_or_uri if not is_content_uri(destination_dir_or_uri) else get_default_download_dir()
     dest_dir = ensure_valid_download_dir(dest_dir)
     target_path = os.path.join(dest_dir, display_name)
 
@@ -224,11 +302,11 @@ def save_file_to_destination(staging_filepath, destination_dir_or_uri, display_n
     return target_path
 
 def uri_to_display_name(uri_or_path):
-    """Generate human-readable representation of directory path or SAF tree URI."""
+    """Generate human-readable representation of directory path or SAF/MediaStore content URI."""
     if not uri_or_path:
         return "Default: Downloads"
     s = str(uri_or_path)
-    if is_saf_uri(s):
+    if is_content_uri(s):
         import urllib.parse
         decoded = urllib.parse.unquote(s)
         if "primary:" in decoded:
@@ -237,7 +315,13 @@ def uri_to_display_name(uri_or_path):
         elif "/tree/" in decoded:
             part = decoded.split("/tree/")[-1]
             return f"Selected Folder: {part}"
-        return "Selected Folder (SAF)"
+        elif "downloads" in decoded.lower():
+            return "Downloads (MediaStore)"
+        elif "video" in decoded.lower():
+            return "Videos (MediaStore)"
+        elif "audio" in decoded.lower():
+            return "Audio (MediaStore)"
+        return "Selected Folder (SAF/MediaStore)"
     return s
 
 def ensure_valid_download_dir(dir_path=None):
@@ -281,7 +365,11 @@ def ensure_valid_download_dir(dir_path=None):
     return get_default_download_dir()
 
 def uri_to_path(uri_obj):
-    """Convert Android Storage Access Framework content/tree Uri to filesystem path with traversal protection."""
+    """
+    Convert legacy Android Storage Access Framework content/tree Uri to filesystem path where feasible,
+    with strict path traversal protection. Note: On Android 10+ (API 29-36), content:// URIs cannot and must not
+    be assumed to convert into direct POSIX filesystem paths for external storage, and are handled via ContentResolver/SAF/MediaStore.
+    """
     if not uri_obj:
         return None
     try:

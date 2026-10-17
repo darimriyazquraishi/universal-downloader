@@ -37,7 +37,7 @@ version = 2.0.0
 android.numeric_version = 20000
 
 # (list) Application requirements
-requirements = python3,kivy,openssl,yt-dlp,requests,certifi,mutagen,urllib3,charset-normalizer
+requirements = python3,openssl,kivy,yt-dlp,requests,certifi,mutagen,urllib3,charset-normalizer
 
 # (str) Supported orientation (one of landscape, sensorLandscape, portrait or all)
 orientation = portrait
@@ -51,20 +51,23 @@ android.release_artifact = apk
 # (bool) Automatically accept SDK license agreements
 android.accept_sdk_license = True
 
-# (int) Target Android API, aligned with Google Play requirements (API 35: Android 15)
-android.api = 35
+# (int) Target Android API, aligned with Google Play submission requirements (API 36: Android 16)
+android.api = 36
 
 # (int) Minimum API your APK / AAB will support (Android 5.0 Lollipop)
 android.minapi = 21
 
 # (int) Android SDK version to use
-android.sdk = 35
+android.sdk = 36
 
 # (str) Android NDK version to use
-android.ndk = 25b
+android.ndk = 26b
 
 # (int) Android NDK API to use
 android.ndk_api = 21
+
+# (str) python-for-android branch to use
+p4a.branch = develop
 
 # (bool) Use --private data storage (True) or --dir public storage (False)
 android.private_storage = True

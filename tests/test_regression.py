@@ -280,13 +280,15 @@ class TestBuildozerAndWorkflowPaths(unittest.TestCase):
         self.assertEqual(app.get("android.numeric_version"), "20000")
         self.assertEqual(app.get("source.dir"), ".")
 
-        # Target API compliance: dynamically verify target API requirement >= 34
+        # Target API compliance: dynamically verify target API requirement >= 36 (Android 16)
         api = int(app.get("android.api", "0"))
         sdk = int(app.get("android.sdk", "0"))
         minapi = int(app.get("android.minapi", "0"))
-        self.assertGreaterEqual(api, 34, f"Target Android API must be >= 34 to satisfy Google Play requirements (found {api})")
-        self.assertGreaterEqual(sdk, 34, f"Android SDK must be >= 34 (found {sdk})")
+        self.assertGreaterEqual(api, 36, f"Target Android API must be >= 36 to satisfy Google Play requirements (found {api})")
+        self.assertGreaterEqual(sdk, 36, f"Android SDK must be >= 36 (found {sdk})")
         self.assertGreaterEqual(minapi, 21, f"Minimum API must support modern Android (found {minapi})")
+        self.assertEqual(app.get("android.ndk"), "26b", "Android NDK must be configured with compatible LTS release 26b")
+        self.assertEqual(app.get("p4a.branch"), "develop", "python-for-android branch must be develop for modern API support")
 
         # Least-privilege permissions (zero media permissions)
         raw_perms = app.get("android.permissions", "")
@@ -321,6 +323,9 @@ class TestBuildozerAndWorkflowPaths(unittest.TestCase):
         self.assertIn("needs: test", wf)
         self.assertIn("python -m unittest discover", wf)
 
+        # Verify API 36 SDK component setup
+        self.assertIn("platforms;android-36", wf, "Workflow must install platforms;android-36 SDK component")
+
         # Verify build modes and commands
         self.assertIn("buildozer -v android release", wf)
         self.assertIn("buildozer -v android debug", wf)
@@ -328,8 +333,21 @@ class TestBuildozerAndWorkflowPaths(unittest.TestCase):
         # Verify fresh APK build and cleanup of old artifacts
         self.assertIn("rm -rf bin dist_apk", wf)
 
-        # Verify apksigner verify check to prevent double-signing
-        self.assertTrue("apksigner verify" in wf or "$APKSIGNER verify" in wf, "Workflow must verify APK signature with apksigner")
+        # Verify dynamic version and artifact naming derived from buildozer.spec
+        self.assertIn("buildozer.spec", wf)
+        self.assertIn("APP_VERSION", wf)
+
+        # Verify strict cryptographic signature verification and fingerprint matching
+        self.assertTrue("apksigner verify --print-certs" in wf or "$APKSIGNER verify --print-certs" in wf, "Workflow must verify signature with apksigner --print-certs")
+        self.assertIn("EXPECTED_KS_FP", wf)
+        self.assertIn("ACTUAL_CERT_FP", wf)
+        self.assertIn("CN=Android Debug", wf)
+
+        # Verify collision-safe release tags
+        self.assertIn("github.run_attempt", wf)
+
+        # Verify absence of unverified release claims (e.g. no fake 100% test coverage claim)
+        self.assertNotIn("100% CI automated test coverage", wf, "Unverified 100% test coverage claim found in release body")
 
         # Verify default restricted permissions
         self.assertIn("permissions:", wf)
@@ -394,7 +412,9 @@ class TestStorageDestinationAndUriHandling(unittest.TestCase):
     def test_is_saf_uri_detection(self):
         self.assertTrue(engine.is_saf_uri("content://com.android.externalstorage.documents/tree/primary%3ADownload"))
         self.assertTrue(engine.is_saf_uri("content://media/external/images/media/123"))
+        self.assertTrue(engine.is_content_uri("content://media/external/downloads"))
         self.assertFalse(engine.is_saf_uri("/storage/emulated/0/Download"))
+        self.assertFalse(engine.is_content_uri("/storage/emulated/0/Download"))
         self.assertFalse(engine.is_saf_uri("C:\\Users\\User\\Downloads"))
         self.assertFalse(engine.is_saf_uri(None))
 
@@ -403,10 +423,18 @@ class TestStorageDestinationAndUriHandling(unittest.TestCase):
         result = engine.ensure_valid_download_dir(saf_uri)
         self.assertEqual(result, saf_uri, "ensure_valid_download_dir must preserve SAF URIs without attempting filesystem operations")
 
+        mediastore_uri = "content://media/external/downloads"
+        res_ms = engine.ensure_valid_download_dir(mediastore_uri)
+        self.assertEqual(res_ms, mediastore_uri, "ensure_valid_download_dir must preserve MediaStore URIs without attempting filesystem operations")
+
     def test_uri_to_display_name_formatting(self):
         # SAF URIs formatted for user display
         self.assertEqual(engine.uri_to_display_name("content://com.android.externalstorage.documents/tree/primary%3ADownload"), "Selected Folder: Download")
         self.assertEqual(engine.uri_to_display_name("content://com.android.externalstorage.documents/tree/primary%3AMusic%2FRock"), "Selected Folder: Music/Rock")
+        # MediaStore URIs formatted for user display
+        self.assertEqual(engine.uri_to_display_name("content://media/external/downloads"), "Downloads (MediaStore)")
+        self.assertEqual(engine.uri_to_display_name("content://media/external/video/media"), "Videos (MediaStore)")
+        self.assertEqual(engine.uri_to_display_name("content://media/external/audio/media"), "Audio (MediaStore)")
         # Standard filesystem paths
         self.assertEqual(engine.uri_to_display_name("/storage/emulated/0/Download"), "/storage/emulated/0/Download")
         self.assertEqual(engine.uri_to_display_name(None), "Default: Downloads")

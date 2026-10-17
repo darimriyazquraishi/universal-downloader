@@ -103,14 +103,25 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y git zip unzip autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo5 cmake libffi-dev libssl-dev
 
+      - name: Install Android SDK Platform 36 & Build Tools
+        run: |
+          echo "Ensuring Android SDK Platform 36 & Build Tools are installed..."
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools" || true
+
       - name: Install Buildozer & Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install buildozer cython virtualenv
+          pip install --upgrade buildozer cython virtualenv "git+https://github.com/kivy/python-for-android.git"
 
-      - name: Determine Build Type
+      - name: Determine Build Type and Extract Release Configuration
         id: mode
         run: |
+          APP_VER=$(grep -E '^\s*version\s*=' buildozer.spec | cut -d '=' -f2 | tr -d ' ')
+          if [ -z "$APP_VER" ]; then APP_VER="2.0.0"; fi
+          echo "app_version=$APP_VER" >> $GITHUB_OUTPUT
+          echo "Configured App Version: $APP_VER"
+
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             echo "build_mode=debug" >> $GITHUB_OUTPUT
             echo "artifact_name=UniversalDownloader-Android-Debug-APK" >> $GITHUB_OUTPUT
@@ -173,6 +184,7 @@ jobs:
           KEY_PASS: ${{ secrets.RELEASE_KEYALIAS_PASSWD }}
           KEY_ALIAS: ${{ secrets.RELEASE_KEYALIAS }}
           KS_PASS: ${{ secrets.RELEASE_KEYSTORE_PASSWD }}
+          TRUSTED_CERT_SECRET: ${{ secrets.RELEASE_CERT_SHA256 }}
         run: |
           APKSIGNER=$(find $ANDROID_HOME/build-tools -name apksigner | sort -V | tail -n 1)
           ZIPALIGN=$(find $ANDROID_HOME/build-tools -name zipalign | sort -V | tail -n 1)
@@ -195,7 +207,7 @@ jobs:
           set -e
 
           if [ $ALREADY_SIGNED -eq 0 ]; then
-            echo "APK is already signed by Gradle/p4a with release keystore. Skipping redundant signing."
+            echo "APK is already signed. Verifying signing identity against trusted certificate..."
             target_apk="$raw_apk"
           else
             echo "APK requires alignment and signature. Inspecting state..."
@@ -227,13 +239,68 @@ jobs:
               "$target_apk"
           fi
 
-          # Final verification of certificate and signature
-          echo "Executing final signature verification:"
-          $APKSIGNER verify --verbose "$target_apk"
+          # Production APK Signature & Identity Verification
+          echo "Executing rigorous cryptographic signature verification:"
+          set +e
+          $APKSIGNER verify --print-certs --verbose "$target_apk" > /tmp/cert_verify.log 2>&1
+          SIGN_STATUS=$?
+          set -e
 
-          cp "$target_apk" dist_apk/UniversalDownloader-v2.0.0.apk
-          echo "Final verified release APK: dist_apk/UniversalDownloader-v2.0.0.apk"
-          sha256sum dist_apk/UniversalDownloader-v2.0.0.apk
+          cat /tmp/cert_verify.log
+
+          if [ $SIGN_STATUS -ne 0 ]; then
+            echo "::error::Production APK signature verification failed! The APK is unsigned or invalidly signed."
+            exit 1
+          fi
+
+          # Extract actual certificate SHA-256 fingerprint from the APK
+          ACTUAL_CERT_FP=$(grep -i "certificate SHA-256 digest:" /tmp/cert_verify.log | head -n 1 | awk '{print $NF}' | tr '[:upper:]' '[:lower:]' | tr -d ':')
+          if [ -z "$ACTUAL_CERT_FP" ]; then
+            echo "::error::Failed to extract certificate SHA-256 fingerprint from APK!"
+            exit 1
+          fi
+
+          # Extract Subject DN and fail if signed with Android Debug certificate
+          if grep -i "CN=Android Debug" /tmp/cert_verify.log || grep -i "O=Android" /tmp/cert_verify.log; then
+            echo "::error::Production APK is signed with Android Debug certificate! Failing build."
+            exit 1
+          fi
+
+          # Compute expected SHA-256 fingerprint directly from trusted release keystore
+          EXPECTED_KS_FP=$(keytool -exportcert -alias "$KEY_ALIAS" -keystore /home/runner/.keystores/release.keystore -storepass "$KS_PASS" | sha256sum | awk '{print $1}' | tr '[:upper:]' '[:lower:]' | tr -d ':')
+          
+          echo "=== SIGNATURE FINGERPRINT VERIFICATION ==="
+          echo "Expected Keystore Certificate SHA-256: $EXPECTED_KS_FP"
+          echo "Actual APK Signer Certificate SHA-256:  $ACTUAL_CERT_FP"
+
+          if [ "$ACTUAL_CERT_FP" != "$EXPECTED_KS_FP" ]; then
+            echo "::error::Signing identity mismatch! The APK was signed with an unexpected certificate ($ACTUAL_CERT_FP vs $EXPECTED_KS_FP)."
+            exit 1
+          fi
+
+          # If an explicit RELEASE_CERT_SHA256 secret is configured, cross-verify against it
+          if [ -n "$TRUSTED_CERT_SECRET" ]; then
+            TRUSTED_SECRET_FP=$(echo "$TRUSTED_CERT_SECRET" | tr '[:upper:]' '[:lower:]' | tr -d ': ')
+            if [ "$ACTUAL_CERT_FP" != "$TRUSTED_SECRET_FP" ]; then
+              echo "::error::APK certificate fingerprint does not match trusted RELEASE_CERT_SHA256 secret ($ACTUAL_CERT_FP vs $TRUSTED_SECRET_FP)!"
+              exit 1
+            fi
+            echo "Cross-verified successfully against trusted RELEASE_CERT_SHA256 secret."
+          fi
+
+          # Verify modern signature scheme presence (v2 / v3)
+          if ! grep -q "Verified using v2 scheme (APK Signature Scheme v2): true" /tmp/cert_verify.log && \
+             ! grep -q "Verified using v3 scheme (APK Signature Scheme v3): true" /tmp/cert_verify.log; then
+            echo "::error::APK must be signed with APK Signature Scheme v2 or v3 for modern Android submission!"
+            exit 1
+          fi
+
+          APP_VERSION="${{ steps.mode.outputs.app_version }}"
+          FINAL_APK="dist_apk/UniversalDownloader-v${APP_VERSION}.apk"
+          cp "$target_apk" "$FINAL_APK"
+          echo "Final verified release APK: $FINAL_APK"
+          APK_SHA=$(sha256sum "$FINAL_APK" | awk '{print $1}')
+          echo "APK SHA-256: $APK_SHA"
 
       - name: Build Debug APK with Buildozer
         if: steps.mode.outputs.build_mode == 'debug'
@@ -244,9 +311,11 @@ jobs:
             echo "::error::No debug APK produced in bin/ by Buildozer!"
             exit 1
           fi
-          cp "${DEBUG_APKS[0]}" dist_apk/UniversalDownloader-v2.0.0-debug.apk
-          echo "Final debug APK: dist_apk/UniversalDownloader-v2.0.0-debug.apk"
-          sha256sum dist_apk/UniversalDownloader-v2.0.0-debug.apk
+          APP_VERSION="${{ steps.mode.outputs.app_version }}"
+          DEBUG_APK="dist_apk/UniversalDownloader-v${APP_VERSION}-debug.apk"
+          cp "${DEBUG_APKS[0]}" "$DEBUG_APK"
+          echo "Final debug APK: $DEBUG_APK"
+          sha256sum "$DEBUG_APK"
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
@@ -277,12 +346,16 @@ jobs:
       - name: Determine Non-Colliding Release Tag
         id: release_meta
         run: |
+          APP_VERSION=$(grep -E '^\s*version\s*=' buildozer.spec | cut -d '=' -f2 | tr -d ' ')
+          if [ -z "$APP_VERSION" ]; then APP_VERSION="2.0.0"; fi
+          echo "app_version=$APP_VERSION" >> $GITHUB_OUTPUT
+
           if [ "${{ github.ref_type }}" = "tag" ]; then
             TAG_NAME="${{ github.ref_name }}"
           elif [ -n "${{ github.event.inputs.release_tag }}" ]; then
             TAG_NAME="${{ github.event.inputs.release_tag }}"
           else
-            TAG_NAME="v2.0.0-release.build-${{ github.run_number }}"
+            TAG_NAME="v${APP_VERSION}-release.build-${{ github.run_number }}.${{ github.run_attempt }}"
           fi
           echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
           echo "Target Release Tag: $TAG_NAME"
@@ -293,11 +366,11 @@ jobs:
           tag_name: ${{ steps.release_meta.outputs.tag_name }}
           name: Universal Downloader Android APK ${{ steps.release_meta.outputs.tag_name }}
           body: |
-            ### Universal Downloader for Android (v2.0.0) - Production Release
-            - **Google Play Target API**: Aligned with Google Play requirements (Target API 35: Android 15).
-            - **Cryptographic Signature Verification**: Verified via `apksigner` with release keystore across APK Signature Schemes v1, v2, and v3 under package domain `com.universalmedia`.
+            ### Universal Downloader for Android (v${{ steps.release_meta.outputs.app_version }}) - Production Release
+            - **Target Android API**: Aligned with Google Play submission requirements (Target API 36: Android 16).
+            - **Cryptographic Signature Verification**: Verified via `apksigner` with release certificate SHA-256 fingerprint matching the trusted release identity.
             - **Storage Access Framework (SAF) & MediaStore**: Compliant Scoped Storage with least-privilege permissions (`INTERNET`, `ACCESS_NETWORK_STATE`).
-            - **Security & Integrity**: Zero debuggable flags (`android:debuggable="false"`), strict TLS verification, and 100% CI automated test coverage.
-          files: dist_apk/UniversalDownloader-v2.0.0.apk
+            - **Security & Integrity**: Zero debuggable flags (`android:debuggable="false"`), strict TLS certificate verification, and 28 regression tests executed and passed in CI.
+          files: dist_apk/*.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
