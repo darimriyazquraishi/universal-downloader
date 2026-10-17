@@ -67,7 +67,7 @@ android.ndk = 26b
 android.ndk_api = 21
 
 # (str) python-for-android branch/tag to use (pinned to tested stable release)
-p4a.branch = v2026.5.9
+p4a.branch = release-2026.05.09
 
 # (bool) Use --private data storage (True) or --dir public storage (False)
 android.private_storage = True

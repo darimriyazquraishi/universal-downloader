@@ -287,7 +287,7 @@ class TestBuildozerAndWorkflowPaths(unittest.TestCase):
         self.assertGreaterEqual(api, 36, f"Target Android API must be >= 36 to satisfy Google Play requirements (found {api})")
         self.assertGreaterEqual(sdk, 36, f"Android SDK must be >= 36 (found {sdk})")
         self.assertGreaterEqual(minapi, 21, f"Minimum API must support modern Android (found {minapi})")
-        self.assertIn(app.get("p4a.branch"), ["v2026.5.9", "develop"], "python-for-android branch must be pinned release or develop")
+        self.assertIn(app.get("p4a.branch"), ["release-2026.05.09", "v2026.05.09", "develop"], "python-for-android branch must be pinned release or develop")
 
         # Least-privilege permissions (zero media permissions)
         raw_perms = app.get("android.permissions", "")
