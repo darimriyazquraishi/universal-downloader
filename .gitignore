@@ -32,3 +32,13 @@ downloads/
 Thumbs.db
 .vscode/
 .idea/
+
+# Release Keystores & Signing Secrets
+*.keystore
+*.jks
+*.p12
+*.pem
+*.key
+release.keystore
+android_app/release.keystore
+

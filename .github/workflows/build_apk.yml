@@ -40,22 +40,47 @@ jobs:
           pip install --upgrade pip
           pip install buildozer cython virtualenv
 
-      - name: Setup Permanent Release Keystore
+      - name: Setup Release Keystore from Secrets
+        env:
+          KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          KEYSTORE_PASS: ${{ secrets.RELEASE_KEYSTORE_PASSWD }}
+          KEY_ALIAS: ${{ secrets.RELEASE_KEYALIAS }}
         run: |
           mkdir -p ~/.keystores
-          cp android_app/release.keystore ~/.keystores/release.keystore
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "Loading signing keystore from GitHub Secrets..."
+            echo "$KEYSTORE_BASE64" | base64 -d > ~/.keystores/release.keystore
+          elif [ -f android_app/release.keystore ]; then
+            echo "Using local release keystore..."
+            cp android_app/release.keystore ~/.keystores/release.keystore
+          else
+            echo "No keystore secret found. Generating ephemeral build keystore for artifact generation..."
+            keytool -genkeypair -v \
+              -keystore ~/.keystores/release.keystore \
+              -alias "${KEY_ALIAS:-universalmedia}" \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -storepass "${KEYSTORE_PASS:-UniversalBuild2026!}" \
+              -keypass "${KEYSTORE_PASS:-UniversalBuild2026!}" \
+              -dname "CN=Universal Downloader, OU=Production, O=Universal Media, L=New York, ST=NY, C=US" \
+              -storetype PKCS12
+          fi
 
       - name: Build Release APK with Buildozer
         working-directory: ./android_app
         env:
           P4A_RELEASE_KEYSTORE: /home/runner/.keystores/release.keystore
-          P4A_RELEASE_KEYSTORE_PASSWD: "Universal2026Media!"
-          P4A_RELEASE_KEYALIAS: "universalmedia"
-          P4A_RELEASE_KEYALIAS_PASSWD: "Universal2026Media!"
+          P4A_RELEASE_KEYSTORE_PASSWD: ${{ secrets.RELEASE_KEYSTORE_PASSWD || 'UniversalBuild2026!' }}
+          P4A_RELEASE_KEYALIAS: ${{ secrets.RELEASE_KEYALIAS || 'universalmedia' }}
+          P4A_RELEASE_KEYALIAS_PASSWD: ${{ secrets.RELEASE_KEYALIAS_PASSWD || secrets.RELEASE_KEYSTORE_PASSWD || 'UniversalBuild2026!' }}
         run: |
           yes | buildozer -v android release
 
       - name: Production Align & Sign APK with apksigner (v1, v2, v3 schemes)
+        env:
+          KEY_PASS: ${{ secrets.RELEASE_KEYSTORE_PASSWD || 'UniversalBuild2026!' }}
+          KEY_ALIAS: ${{ secrets.RELEASE_KEYALIAS || 'universalmedia' }}
         run: |
           APKSIGNER=$(find $ANDROID_HOME/build-tools -name apksigner | sort -V | tail -n 1)
           ZIPALIGN=$(find $ANDROID_HOME/build-tools -name zipalign | sort -V | tail -n 1)
@@ -76,12 +101,12 @@ jobs:
               target_apk="$aligned_apk"
             fi
 
-            echo "Signing $target_apk with permanent release keystore..."
+            echo "Signing $target_apk with release keystore..."
             $APKSIGNER sign \
               --ks /home/runner/.keystores/release.keystore \
-              --ks-key-alias universalmedia \
-              --ks-pass pass:Universal2026Media! \
-              --key-pass pass:Universal2026Media! \
+              --ks-key-alias "$KEY_ALIAS" \
+              --ks-pass "pass:$KEY_PASS" \
+              --key-pass "pass:$KEY_PASS" \
               --v1-signing-enabled true \
               --v2-signing-enabled true \
               --v3-signing-enabled true \

@@ -8,6 +8,16 @@ import threading
 import unicodedata
 import subprocess
 
+# Configure secure Mozilla CA bundle via certifi for robust TLS certificate validation
+try:
+    import certifi
+    ca_bundle = certifi.where()
+    if ca_bundle and os.path.exists(ca_bundle):
+        os.environ.setdefault('SSL_CERT_FILE', ca_bundle)
+        os.environ.setdefault('REQUESTS_CA_BUNDLE', ca_bundle)
+except Exception:
+    pass
+
 # Configure mobile simulation viewport and high-performance fluid rendering
 from kivy.config import Config
 Config.set('graphics', 'width', '412')
@@ -719,7 +729,14 @@ class HomeScreen(Screen):
         try:
             self.btn_inspect.set_text("INSPECT")
             self.badge_platform.text = "INSPECTION FAILED"
-            self.lbl_inspect_title.text = err[:80]
+            clean_err = str(err)
+            if "CERTIFICATE_VERIFY_FAILED" in clean_err or "CertificateVerifyError" in clean_err:
+                clean_err = "SSL certificate verification failed"
+            elif "Unsupported URL" in clean_err:
+                clean_err = "Unsupported URL or domain"
+            elif "HTTP Error 403" in clean_err:
+                clean_err = "Access forbidden by host (403)"
+            self.lbl_inspect_title.text = clean_err[:80]
             Animation.stop_all(self.row_scope)
             self.row_scope.disabled = True
             Animation(height=0, opacity=0.0, duration=0.20, t='out_quad').start(self.row_scope)
@@ -875,7 +892,6 @@ class HomeScreen(Screen):
                         opts = {
                             'quiet': True,
                             'no_warnings': True,
-                            'nocheckcertificate': True,
                             'extractor_args': {
                                 'youtube': {
                                     'player_client': ['android', 'ios', 'web']
@@ -903,7 +919,6 @@ class HomeScreen(Screen):
                             opts = {
                                 'quiet': True,
                                 'no_warnings': True,
-                                'nocheckcertificate': True,
                                 'extractor_args': {
                                     'youtube': {
                                         'player_client': ['android', 'ios', 'web']
@@ -923,7 +938,6 @@ class HomeScreen(Screen):
                             opts = {
                                 'quiet': True,
                                 'no_warnings': True,
-                                'nocheckcertificate': True,
                                 'extractor_args': {
                                     'youtube': {
                                         'player_client': ['android', 'ios', 'web']
@@ -1016,7 +1030,9 @@ class HomeScreen(Screen):
             self.is_downloading = False
             self.btn_download.set_text("START DOWNLOAD")
             clean_err = str(err)
-            if "Requested format is not available" in clean_err:
+            if "CERTIFICATE_VERIFY_FAILED" in clean_err or "CertificateVerifyError" in clean_err:
+                clean_err = "SSL certificate verification failed"
+            elif "Requested format is not available" in clean_err:
                 clean_err = "Format unavailable on host"
             elif "HTTP Error 403" in clean_err:
                 clean_err = "Access forbidden (403)"
@@ -1477,11 +1493,7 @@ class UniversalDownloaderMobileApp(App):
 
         if IS_ANDROID:
             try:
-                perms = [Permission.INTERNET]
-                for p_name in ['READ_MEDIA_VIDEO', 'READ_MEDIA_AUDIO', 'READ_EXTERNAL_STORAGE']:
-                    if hasattr(Permission, p_name):
-                        perms.append(getattr(Permission, p_name))
-                request_permissions(perms)
+                request_permissions([Permission.INTERNET])
             except Exception:
                 pass
 

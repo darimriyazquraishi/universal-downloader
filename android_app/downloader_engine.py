@@ -9,6 +9,16 @@ import unicodedata
 import urllib.parse
 import yt_dlp
 
+# Configure secure Mozilla CA bundle via certifi for robust TLS certificate validation
+try:
+    import certifi
+    ca_bundle = certifi.where()
+    if ca_bundle and os.path.exists(ca_bundle):
+        os.environ.setdefault('SSL_CERT_FILE', ca_bundle)
+        os.environ.setdefault('REQUESTS_CA_BUNDLE', ca_bundle)
+except Exception:
+    pass
+
 # Safeguard Kivy ProcessingStream buffer attribute so yt-dlp never encounters 'str' object has no attribute 'write'
 try:
     from kivy.logger import ProcessingStream
@@ -414,7 +424,6 @@ def inspect_url(url, scope=None):
     ydl_opts = {
         'quiet': True,
         'no_warnings': True,
-        'nocheckcertificate': True,
         'extract_flat': (active_scope == "playlist"),
         'extractor_args': {
             'youtube': {

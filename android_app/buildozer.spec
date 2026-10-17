@@ -35,7 +35,7 @@ requirements = python3,kivy,openssl,yt-dlp,requests,certifi,mutagen,urllib3,char
 orientation = portrait
 
 # (list) Permissions
-android.permissions = INTERNET,ACCESS_NETWORK_STATE,READ_MEDIA_VIDEO,READ_MEDIA_AUDIO
+android.permissions = INTERNET,ACCESS_NETWORK_STATE
 
 # (str) Format of artifact to build (apk, aab)
 android.release_artifact = apk
