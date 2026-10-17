@@ -77,6 +77,12 @@ jobs:
 
       - name: Run Test Suite & Capture Actual Results
         id: run_tests
+        env:
+          KIVY_NO_ARGS: "1"
+          KIVY_NO_CONSOLELOG: "1"
+          KIVY_WINDOW: "dummy"
+          SDL_VIDEODRIVER: "dummy"
+          KIVY_AUDIO: "dummy"
         run: |
           python -c '
           import sys, os, unittest

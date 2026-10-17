@@ -1,5 +1,13 @@
 import os
 import sys
+
+# Configure headless environment BEFORE any Kivy or UI imports
+os.environ["KIVY_NO_ARGS"] = "1"
+os.environ["KIVY_NO_CONSOLELOG"] = "1"
+os.environ["KIVY_WINDOW"] = "dummy"
+os.environ["SDL_VIDEODRIVER"] = "dummy"
+os.environ["KIVY_AUDIO"] = "dummy"
+
 import json
 import unittest
 import configparser

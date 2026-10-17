@@ -109,7 +109,7 @@ else:
 
 # Check Android Environment & PyJNIus
 try:
-    from jnius import autoclass
+    from jnius import autoclass, PythonJavaClass, java_method
     from android.permissions import request_permissions, Permission
     PythonActivity = autoclass('org.kivy.android.PythonActivity')
     Intent = autoclass('android.content.Intent')
@@ -118,6 +118,10 @@ try:
 except Exception:
     IS_ANDROID = False
     autoclass = None
+    class PythonJavaClass:
+        pass
+    def java_method(sig):
+        return lambda f: f
 
 # Luxury Gold Theme Palette (Zero Red)
 COLOR_BG = [0.055, 0.055, 0.075, 1.0]        # Deep Obsidian #0E0E13
@@ -1331,7 +1335,6 @@ class ManagerScreen(Screen):
                     # so the resulting content URI is immediately opened upon scan completion.
                     try:
                         MediaScannerConnection = autoclass('android.media.MediaScannerConnection')
-                        from jnius import PythonJavaClass, java_method
 
                         class ScanCompletedListener(PythonJavaClass):
                             __javacontext__ = 'app'
