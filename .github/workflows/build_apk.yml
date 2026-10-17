@@ -31,6 +31,7 @@ on:
       - 'requirements.txt'
       - 'assets/**'
       - 'tests/**'
+      - 'tools/**'
       - '.github/workflows/build_apk.yml'
     tags:
       - 'v*'
@@ -44,6 +45,7 @@ on:
       - 'requirements.txt'
       - 'assets/**'
       - 'tests/**'
+      - 'tools/**'
       - '.github/workflows/build_apk.yml'
 
 permissions:
@@ -139,58 +141,148 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y git zip unzip autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo5 cmake libffi-dev libssl-dev
 
-      - name: Install Android SDK Platform 36 & Build Tools
+      - name: Install Android SDK, Build Tools, and NDK in Buildozer's actual SDK root
+        shell: bash
         run: |
-          echo "Installing pinned Android SDK Platform 36 and Build Tools 36.0.0..."
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+          set -euo pipefail
+          RUNNER_SDK_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          if [ -z "$RUNNER_SDK_HOME" ]; then
+            echo "::error::The GitHub runner Android SDK path is not configured."
+            exit 1
+          fi
+          SDKMANAGER="$RUNNER_SDK_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            echo "::error::SDK manager is missing at $SDKMANAGER"
+            exit 1
+          fi
 
-      - name: Verify Android SDK Components
-        run: |
-          echo "Verifying mandatory Android SDK components are present..."
-          if [ ! -d "$ANDROID_HOME/platforms/android-36" ]; then
-            echo "::error::Mandatory Android SDK Platform 36 component missing in $ANDROID_HOME/platforms/android-36!"
-            exit 1
-          fi
-          if [ ! -d "$ANDROID_HOME/build-tools/36.0.0" ]; then
-            echo "::error::Mandatory Android Build Tools 36.0.0 component missing in $ANDROID_HOME/build-tools/36.0.0!"
-            exit 1
-          fi
-          if [ ! -x "$ANDROID_HOME/build-tools/36.0.0/apksigner" ]; then
-            echo "::error::apksigner not found in $ANDROID_HOME/build-tools/36.0.0!"
-            exit 1
-          fi
-          if [ ! -x "$ANDROID_HOME/build-tools/36.0.0/zipalign" ]; then
-            echo "::error::zipalign not found in $ANDROID_HOME/build-tools/36.0.0!"
-            exit 1
-          fi
-          if [ ! -d "$ANDROID_HOME/platform-tools" ]; then
-            echo "::error::Android platform-tools component missing in $ANDROID_HOME/platform-tools!"
-            exit 1
-          fi
-          echo "[OK] Android SDK Platform 36, Build Tools 36.0.0, and platform-tools verified successfully."
+          # Buildozer does not use the runner's preinstalled SDK by default. Its default
+          # SDK root is ~/.buildozer/android/platform/android-sdk, so install and verify
+          # the components there instead of inspecting a different SDK.
+          BUILD_PLAT="$HOME/.buildozer/android/platform"
+          BUILD_SDK="$BUILD_PLAT/android-sdk"
+          BUILD_NDK="$BUILD_PLAT/android-ndk-r28c"
+          mkdir -p "$BUILD_SDK" "$BUILD_PLAT"
 
-      - name: Install Buildozer & Dependencies
+          # Expose command-line tools in both the modern SDK layout used by sdkmanager
+          # and the legacy tools/bin path Buildozer 1.6 resolves. The installed packages
+          # themselves are still written under BUILD_SDK via --sdk_root.
+          mkdir -p "$BUILD_SDK/cmdline-tools"
+          if [ -e "$BUILD_SDK/cmdline-tools/latest" ] && [ ! -L "$BUILD_SDK/cmdline-tools/latest" ]; then
+            echo "::error::Unexpected non-symlink command-line tools path: $BUILD_SDK/cmdline-tools/latest"
+            exit 1
+          fi
+          if [ -e "$BUILD_SDK/tools" ] && [ ! -L "$BUILD_SDK/tools" ]; then
+            echo "::error::Unexpected non-symlink legacy SDK tools path: $BUILD_SDK/tools"
+            exit 1
+          fi
+          ln -sfn "$RUNNER_SDK_HOME/cmdline-tools/latest" "$BUILD_SDK/cmdline-tools/latest"
+          ln -sfn "$BUILD_SDK/cmdline-tools/latest" "$BUILD_SDK/tools"
+
+          echo "Accepting SDK licences for Buildozer SDK root: $BUILD_SDK"
+          "$SDKMANAGER" --sdk_root="$BUILD_SDK" --licenses < <(yes)
+          "$SDKMANAGER" --sdk_root="$BUILD_SDK" \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "platform-tools" \
+            "ndk;28.2.13676358"
+
+          # Buildozer's configured NDK name maps to android-ndk-r28c. Expose the
+          # SDK Manager-installed r28c package at that exact path.
+          if [ -e "$BUILD_NDK" ] && [ ! -L "$BUILD_NDK" ]; then
+            echo "::error::Unexpected pre-existing non-symlink NDK path: $BUILD_NDK"
+            exit 1
+          fi
+          ln -sfn "$BUILD_SDK/ndk/28.2.13676358" "$BUILD_NDK"
+
+          required_paths=(
+            "$BUILD_SDK/tools/bin/sdkmanager"
+            "$BUILD_SDK/cmdline-tools/latest/bin/sdkmanager"
+            "$BUILD_SDK/cmdline-tools/latest/source.properties"
+            "$BUILD_SDK/platforms/android-36/android.jar"
+            "$BUILD_SDK/build-tools/36.0.0/apksigner"
+            "$BUILD_SDK/build-tools/36.0.0/zipalign"
+            "$BUILD_SDK/build-tools/36.0.0/aapt"
+            "$BUILD_SDK/platform-tools/adb"
+            "$BUILD_NDK/source.properties"
+          )
+          for required in "${required_paths[@]}"; do
+            if [ ! -e "$required" ]; then
+              echo "::error::Required Buildozer SDK/NDK component is missing: $required"
+              exit 1
+            fi
+          done
+          if ! grep -q 'Pkg.Revision = 28.2.13676358' "$BUILD_NDK/source.properties"; then
+            echo "::error::The NDK at $BUILD_NDK is not revision 28.2.13676358 (r28c)."
+            exit 1
+          fi
+
+          # Make every later workflow step use the same SDK/NDK locations Buildozer
+          # resolves from its configuration. Buildozer's default NDK path is a symlink
+          # to the exact SDK Manager-installed package above.
+          {
+            echo "ANDROID_HOME=$BUILD_SDK"
+            echo "ANDROID_SDK_ROOT=$BUILD_SDK"
+            echo "ANDROIDSDK=$BUILD_SDK"
+            echo "ANDROIDNDK=$BUILD_NDK"
+            echo "ANDROID_NDK_HOME=$BUILD_NDK"
+            echo "ANDROIDNDKVER=r28c"
+            echo "ANDROIDAPI=36"
+            echo "NDKAPI=21"
+          } >> "$GITHUB_ENV"
+          echo "$BUILD_SDK/platform-tools" >> "$GITHUB_PATH"
+          echo "$BUILD_SDK/build-tools/36.0.0" >> "$GITHUB_PATH"
+          echo "[OK] API 36, Build Tools 36.0.0, platform-tools, and NDK r28c installed in Buildozer's actual SDK root."
+
+      - name: Verify Buildozer SDK and NDK Paths
+        shell: bash
         run: |
+          set -euo pipefail
+          EXPECTED_SDK="$HOME/.buildozer/android/platform/android-sdk"
+          EXPECTED_NDK="$HOME/.buildozer/android/platform/android-ndk-r28c"
+          if [ "$(realpath "$ANDROID_HOME")" != "$(realpath "$EXPECTED_SDK")" ]; then
+            echo "::error::ANDROID_HOME does not point to Buildozer's SDK root."
+            exit 1
+          fi
+          if [ "$(realpath "$ANDROIDSDK")" != "$(realpath "$EXPECTED_SDK")" ]; then
+            echo "::error::ANDROIDSDK does not point to the SDK root Buildozer will use."
+            exit 1
+          fi
+          if [ "$(realpath "$ANDROIDNDK")" != "$(realpath "$ANDROID_HOME/ndk/28.2.13676358")" ]; then
+            echo "::error::ANDROIDNDK does not point to the installed r28c package."
+            exit 1
+          fi
+          if [ "$(realpath "$EXPECTED_NDK")" != "$(realpath "$ANDROID_HOME/ndk/28.2.13676358")" ]; then
+            echo "::error::Buildozer's configured NDK directory does not resolve to r28c."
+            exit 1
+          fi
+          grep -q 'Pkg.Revision = 28.2.13676358' "$ANDROIDNDK/source.properties"
+          echo "[OK] Buildozer and validation steps resolve the same SDK root and NDK r28c."
+
+      - name: Install Pinned Buildozer Tooling
+        shell: bash
+        run: |
+          set -euo pipefail
           python -m pip install --upgrade pip
-          pip install buildozer==1.6.0 cython==0.29.37 virtualenv==21.14.8 python-for-android==2026.5.9
-          # Ensure python-for-android applies 16 KB ELF LOAD segment alignment linker flags to all recipes
-          python -c '
-          import site, os
-          for p in site.getsitepackages():
-              archs_path = os.path.join(p, "pythonforandroid", "archs.py")
-              if os.path.exists(archs_path):
-                  with open(archs_path, "r") as f:
-                      content = f.read()
-                  if "-Wl,-z,max-page-size=16384" not in content:
-                      content = content.replace(
-                          "common_ldflags = [\x27-L{ctx_libs_dir}\x27]",
-                          "common_ldflags = [\x27-L{ctx_libs_dir}\x27, \x27-Wl,-z,max-page-size=16384\x27, \x27-Wl,-z,common-page-size=16384\x27]"
-                      )
-                      with open(archs_path, "w") as f:
-                          f.write(content)
-                      print(f"Successfully patched {archs_path} with 16 KB ELF alignment linker flags.")
-          '
+          # Buildozer resolves python-for-android from p4a.branch in buildozer.spec.
+          # Do not patch a separate pip-installed copy: that may not be used by the build.
+          pip install buildozer==1.6.0 cython==0.29.37 virtualenv==21.14.8
+          python - <<'PY'
+          import os
+          sdk = os.environ.get("ANDROIDSDK", "")
+          ndk = os.environ.get("ANDROIDNDK", "")
+          if not sdk or not os.path.isfile(os.path.join(sdk, "platforms", "android-36", "android.jar")):
+              raise SystemExit("Verified API 36 platform is not available at ANDROIDSDK")
+          if not ndk or not os.path.isfile(os.path.join(ndk, "source.properties")):
+              raise SystemExit("Verified NDK is not available at ANDROIDNDK")
+          with open(os.path.join(ndk, "source.properties"), encoding="utf-8") as f:
+              revision = next((line.split("=", 1)[1].strip() for line in f if line.startswith("Pkg.Revision =")), "")
+          if revision != "28.2.13676358":
+              raise SystemExit(f"Expected NDK r28c (28.2.13676358), got {revision!r}")
+          print(f"Buildozer SDK: {sdk}")
+          print(f"Buildozer NDK: {ndk} (revision {revision})")
+          print("NDK r28c provides 16 KB ELF alignment by default; final APK validation is mandatory.")
+          PY
 
       - name: Determine Build Type and Extract Release Configuration
         id: mode
@@ -275,8 +367,19 @@ jobs:
           P4A_RELEASE_KEYSTORE_PASSWD: ${{ secrets.RELEASE_KEYSTORE_PASSWD }}
           P4A_RELEASE_KEYALIAS: ${{ secrets.RELEASE_KEYALIAS }}
           P4A_RELEASE_KEYALIAS_PASSWD: ${{ secrets.RELEASE_KEYALIAS_PASSWD }}
+        shell: bash
         run: |
+          # Feed Buildozer's occasional confirmation prompts without allowing the
+          # producer's expected SIGPIPE (yes exits after Buildozer closes stdin) to
+          # mask Buildozer's real exit status under GitHub's pipefail shell.
+          set +e
           yes | buildozer -v android release
+          build_status=${PIPESTATUS[1]}
+          set -e
+          if [ "$build_status" -ne 0 ]; then
+            echo "::error::Buildozer release build failed with exit code $build_status."
+            exit "$build_status"
+          fi
 
       - name: Inspect, Align & Independently Validate Release APK Signing
         if: steps.mode.outputs.build_mode == 'release'
@@ -288,19 +391,19 @@ jobs:
           APP_VERSION: ${{ steps.mode.outputs.app_version }}
         run: |
           # 1. Require inspection tools (apksigner, zipalign, aapt) to be present and executable
-          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -n 1)
+          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
           if [ -z "$APKSIGNER" ] || [ ! -x "$APKSIGNER" ]; then
             echo "::error::Required inspection tool 'apksigner' not found in $ANDROID_HOME/build-tools!"
             exit 1
           fi
 
-          ZIPALIGN=$(find "$ANDROID_HOME/build-tools" -name zipalign | sort -V | tail -n 1)
+          ZIPALIGN="$ANDROID_HOME/build-tools/36.0.0/zipalign"
           if [ -z "$ZIPALIGN" ] || [ ! -x "$ZIPALIGN" ]; then
             echo "::error::Required inspection tool 'zipalign' not found in $ANDROID_HOME/build-tools!"
             exit 1
           fi
 
-          AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt | sort -V | tail -n 1)
+          AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
           if [ -z "$AAPT" ] || [ ! -x "$AAPT" ]; then
             echo "::error::Required inspection tool 'aapt' not found in $ANDROID_HOME/build-tools!"
             exit 1
@@ -391,7 +494,7 @@ jobs:
           # Normalize mandatory trusted fingerprint secret
           NORMALIZED_TRUSTED_FP=$(echo "$TRUSTED_CERT_SECRET" | tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')
           if ! [[ "$NORMALIZED_TRUSTED_FP" =~ ^[0-9a-f]{64}$ ]]; then
-            echo "::error::Mandatory RELEASE_CERT_SHA256 secret is invalid format: $TRUSTED_CERT_SECRET"
+            echo "::error::Mandatory RELEASE_CERT_SHA256 secret has an invalid format; expected a 64-character SHA-256 fingerprint. Secret value was not printed."
             exit 1
           fi
 
@@ -438,44 +541,9 @@ jobs:
           fi
           echo "[OK] APK 16 KB page alignment verified."
 
-          # 3. Comprehensive ELF segment alignment inspection of all native .so libraries
-          echo "Inspecting ELF LOAD segment alignment of all native libraries in release APK..."
-          python -c '
-          import zipfile, struct, sys
-          apk = "'"$FINAL_APK"'"
-          with zipfile.ZipFile(apk) as z:
-              so_files = [n for n in z.namelist() if n.endswith(".so")]
-              print(f"Inspecting {len(so_files)} native shared libraries in release APK:")
-              failures = []
-              for so in sorted(so_files):
-                  data = z.read(so)
-                  if not data.startswith(b"\x7fELF") or data[4] != 2:
-                      continue
-                  e_phoff = struct.unpack_from("<Q", data, 32)[0]
-                  e_phentsize = struct.unpack_from("<H", data, 54)[0]
-                  e_phnum = struct.unpack_from("<H", data, 56)[0]
-                  so_errors = []
-                  for i in range(e_phnum):
-                      ph_off = e_phoff + i * e_phentsize
-                      p_type = struct.unpack_from("<I", data, ph_off)[0]
-                      if p_type == 1: # PT_LOAD
-                          p_offset = struct.unpack_from("<Q", data, ph_off + 8)[0]
-                          p_vaddr = struct.unpack_from("<Q", data, ph_off + 16)[0]
-                          p_align = struct.unpack_from("<Q", data, ph_off + 48)[0]
-                          if p_align < 16384:
-                              so_errors.append(f"p_align={hex(p_align)} < 0x4000")
-                          if (p_vaddr - p_offset) % 16384 != 0:
-                              so_errors.append(f"(p_vaddr - p_offset) % 16384 != 0")
-                  if so_errors:
-                      failures.append((so, so_errors))
-                      print(f"  [FAIL] {so}: {so_errors}")
-                  else:
-                      print(f"  [PASS] {so}: 16 KB aligned (>=0x4000)")
-              if failures:
-                  print(f"::error::{len(failures)} native library(ies) failed 16 KB ELF segment alignment!")
-                  sys.exit(1)
-              print("[OK] All native libraries verified 16 KB ELF segment aligned.")
-          '
+          # 3. Strictly validate every native .so. Missing, malformed, non-AArch64,
+          # or unaligned libraries fail closed (nothing is silently skipped).
+          python tools/check_elf_alignment.py "$FINAL_APK" --abi arm64-v8a
 
           # 4. Comprehensive badging & manifest verification via aapt
           echo "Inspecting compiled release APK manifest via aapt..."
@@ -498,18 +566,31 @@ jobs:
           echo "[OK] Target SDK verified: 36"
 
           # 4c. Verify debuggable status: Production release APK must NOT be debuggable
-          if grep -q "application-debuggable" /tmp/apk_badging.txt; then
+          # aapt dump badging does not reliably report android:debuggable. Inspect
+          # the compiled manifest XML tree instead; absent means Android's default false.
+          "$AAPT" dump xmltree "$FINAL_APK" AndroidManifest.xml > /tmp/apk_manifest.txt
+          if grep -E 'android:debuggable[^=]*=.*(true|0xffffffff|0x00000001|0x1)[[:space:]]*$' /tmp/apk_manifest.txt; then
             echo "::error::Production release APK must NOT be debuggable!"
             exit 1
           fi
-          echo "[OK] Debuggable status verified: false (production release is not debuggable)"
+          echo "[OK] Compiled manifest contains no true android:debuggable value."
 
       - name: Build Debug APK with Buildozer
         if: steps.mode.outputs.build_mode == 'debug'
         env:
           APP_VERSION: ${{ steps.mode.outputs.app_version }}
+        shell: bash
         run: |
+          # Preserve Buildozer's exit status while tolerating only yes's expected
+          # SIGPIPE after Buildozer has received the required confirmation.
+          set +e
           yes | buildozer -v android debug
+          build_status=${PIPESTATUS[1]}
+          set -e
+          if [ "$build_status" -ne 0 ]; then
+            echo "::error::Buildozer debug build failed with exit code $build_status."
+            exit "$build_status"
+          fi
           DEBUG_APKS=(bin/*.apk)
           if [ ! -f "${DEBUG_APKS[0]}" ]; then
             echo "::error::No debug APK produced in bin/ by Buildozer!"
@@ -521,7 +602,7 @@ jobs:
           sha256sum "$DEBUG_APK"
 
           # Verify compiled debug APK manifest
-          AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt | sort -V | tail -n 1)
+          AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
           if [ -z "$AAPT" ] || [ ! -x "$AAPT" ]; then
             echo "::error::Required inspection tool 'aapt' not found in $ANDROID_HOME/build-tools!"
             exit 1
@@ -539,48 +620,14 @@ jobs:
           fi
           echo "[OK] Compiled debug APK verified: package=com.universalmedia.universaldownloader, targetSdkVersion=36"
 
-          # Check debug APK alignment and ELF alignment
-          ZIPALIGN=$(find "$ANDROID_HOME/build-tools" -name zipalign | sort -V | tail -n 1)
-          if [ -n "$ZIPALIGN" ] && [ -x "$ZIPALIGN" ]; then
-            echo "Checking debug APK alignment via zipalign -c -P 16 4..."
-            "$ZIPALIGN" -c -P 16 4 "$DEBUG_APK" || echo "Note: Debug APK zip entries default alignment check completed."
+          # Debug APK must meet the same native-library and ZIP alignment checks.
+          ZIPALIGN="$ANDROID_HOME/build-tools/36.0.0/zipalign"
+          if [ ! -x "$ZIPALIGN" ]; then
+            echo "::error::Required zipalign tool is missing: $ZIPALIGN"
+            exit 1
           fi
-
-          echo "Inspecting ELF LOAD segment alignment of all native libraries in debug APK..."
-          python -c '
-          import zipfile, struct, sys
-          apk = "'"$DEBUG_APK"'"
-          with zipfile.ZipFile(apk) as z:
-              so_files = [n for n in z.namelist() if n.endswith(".so")]
-              print(f"Inspecting {len(so_files)} native shared libraries in debug APK:")
-              all_pass = True
-              for so in sorted(so_files):
-                  data = z.read(so)
-                  if not data.startswith(b"\x7fELF") or data[4] != 2:
-                      continue
-                  e_phoff = struct.unpack_from("<Q", data, 32)[0]
-                  e_phentsize = struct.unpack_from("<H", data, 54)[0]
-                  e_phnum = struct.unpack_from("<H", data, 56)[0]
-                  so_errors = []
-                  for i in range(e_phnum):
-                      ph_off = e_phoff + i * e_phentsize
-                      p_type = struct.unpack_from("<I", data, ph_off)[0]
-                      if p_type == 1:
-                          p_offset = struct.unpack_from("<Q", data, ph_off + 8)[0]
-                          p_vaddr = struct.unpack_from("<Q", data, ph_off + 16)[0]
-                          p_align = struct.unpack_from("<Q", data, ph_off + 48)[0]
-                          if p_align < 16384:
-                              so_errors.append(f"p_align={hex(p_align)} < 0x4000")
-                          if (p_vaddr - p_offset) % 16384 != 0:
-                              so_errors.append(f"(p_vaddr - p_offset) % 16384 != 0")
-                  if so_errors:
-                      all_pass = False
-                      print(f"  [WARN] {so}: {so_errors}")
-                  else:
-                      print(f"  [PASS] {so}: 16 KB aligned (>=0x4000)")
-              if all_pass:
-                  print("[OK] All debug APK native libraries verified 16 KB ELF segment aligned.")
-          '
+          "$ZIPALIGN" -c -P 16 4 "$DEBUG_APK"
+          python tools/check_elf_alignment.py "$DEBUG_APK" --abi arm64-v8a
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4

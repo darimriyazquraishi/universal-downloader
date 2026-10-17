@@ -1,82 +1,99 @@
-# Universal Media Downloader
+# 📱 Universal Downloader for Android (v2.0.0)
+High-performance, luxury-styled mobile media downloader for Android devices built with **Python**, **Kivy**, and **yt-dlp**.
 
-A native Windows desktop app for downloading videos and audio from YouTube, Facebook, Instagram, TikTok, X (Twitter), Reddit, and thousands of other platforms. The interface is built with **CustomTkinter** featuring an Artcraft/Watermelon-inspired gold aesthetic, and the download engine uses **yt-dlp** with an embedded FFmpeg binary for conversion and stream merging.
+---
 
-## Key Features
+## 🌟 Key Highlights
+- **Target Android API 36 (Android 16)**: Built with modern SDK 36 and NDK 28c toolchain supporting genuine 16 KB ELF segment alignment conforming to Google Play submission requirements.
+- **Universal Platform Support**: YouTube, Instagram Reels/Posts, TikTok, X (Twitter), Facebook, Reddit, Pinterest, SoundCloud, and Vimeo.
+- **Strict TLS Security**: Complete TLS certificate validation using Mozilla CA bundles (via `certifi`). Insecure certificate bypasses are strictly disabled.
+- **Scoped Storage & MediaStore**: Compliant Scoped Storage utilizing Android MediaStore and Storage Access Framework (SAF) without broad storage permissions (`MANAGE_EXTERNAL_STORAGE`).
+- **High-Refresh Display Fluidity**: Unlocked frame loop rendering (`maxfps: 0`) delivering butter-smooth 90Hz / 120Hz / 144Hz animation on modern AMOLED displays.
+- **Hardware-Accelerated 2D Rendering**: Nested rounded-rectangle vertex caching eliminating CPU bezier re-tessellation during fast scrolling.
+- **Least-Privilege Permissions**: Clean Scoped Storage architecture declaring only `INTERNET` and `ACCESS_NETWORK_STATE` permissions. Zero invasive media library permissions (`READ_MEDIA_VIDEO`, `READ_MEDIA_AUDIO`).
+- **App-Only Download Manager**: Tracks and manages only downloaded media with one-tap system player and file explorer integration.
+- **Social Share Intent**: Select "Share" from YouTube, Instagram, or TikTok and pick Universal Downloader to inspect and download immediately.
+- **Production Release Packaging**: Configured for clean `buildozer android release` builds with rigorous cryptographic signature verification.
 
-- **Multi-Platform Support**: Download clips, reels, posts, playlists, and tracks from YouTube, Instagram, TikTok, Facebook, X/Twitter, Reddit, Pinterest, Vimeo, SoundCloud, and more.
-- **Dedicated Download Manager**: Built-in sidebar manager displaying live downloads, completed items, and instant folder location buttons.
-- **Smart URL Inspector**: Deep-inspect links before downloading to inspect item counts, duration, platform tags, and estimated file sizes.
-- **Format Flexibility**:
-  - MP4 Video (Best available up to 4K/1080p, 720p HD, 480p).
-  - High-Fidelity Audio (320 kbps MP3, 192 kbps MP3, AAC M4A).
-  - Speaker / Car USB Mode (128 kbps CBR MP3, 44.1 kHz stereo, ID3v2.3 tags, FAT32-safe filenames).
-- **Clipboard Auto-Inspection**: Automatically detects pasted or copied media URLs.
-- **Dynamic File Management**: Saves to user's `Downloads/Media Downloads` by default with custom folder persistence in `%APPDATA%`.
-- **Duplicate Skipping & Item Limits**: Skip already downloaded items and set custom download limits for playlists/batches.
-- **Zero Browser Involvement**: 100% self-contained native Windows desktop executable with embedded FFmpeg and yt-dlp.
+---
 
-> Download only media you own or have permission to save, and follow applicable platform terms of service.
-
-## Run from source
-
-**Requirements:** Windows 10/11 and Python 3.10 or newer.
-
-```powershell
-python -m pip install -r requirements.txt
-python gui_app.py
-```
-
-If FFmpeg is installed separately, the app can use it from `PATH`. Otherwise `imageio-ffmpeg` provides a bundled FFmpeg binary when running from source.
-
-## Build a standalone `.exe`
-
-```powershell
-python build_exe.py
-```
-
-The script builds `dist/YouTube_Downloader.exe`. It no longer copies the output to a machine-specific folder. The executable includes the desktop UI, yt-dlp, and FFmpeg.
-
-## Android Mobile Edition (`android_app/`)
-
-A dedicated mobile touch interface optimized for Android smartphones, built with **Kivy / KivyMD** adhering to the luxury Gold design system and `Sebino Soft Regular` typography:
-
-- **Bottom Navigation Bar**: Seamlessly switch between **Downloader**, **Download Manager**, and **Settings**.
-- **System Share-Sheet Integration**: When sharing from YouTube, Instagram, TikTok, or X, select *Universal Downloader* to auto-paste and inspect links.
-- **Custom Destination Picker**: Select your preferred destination folder on internal storage or SD card (defaults to `/storage/emulated/0/Download/Media Downloads`).
-- **Live Simulator**: Test and preview the mobile app on Windows using the phone simulator:
-  ```powershell
-  cd android_app
-  run_mobile_simulator.bat
-  ```
-
-### Build Android APK
-
-- **Automated Cloud Build**: Push to GitHub or run the GitHub Actions workflow [`.github/workflows/build_apk.yml`](.github/workflows/build_apk.yml) to compile the APK via Buildozer in the cloud.
-- **Local Linux / WSL Build**:
-  ```bash
-  cd android_app
-  pip install buildozer cython
-  buildozer android debug
-  ```
-  The compiled `.apk` will be in `android_app/bin/`.
-
-## Project layout
-
+## 📂 Project Structure
 ```text
-gui_app.py               # Windows desktop application (CustomTkinter)
-build_exe.py             # PyInstaller Windows build script
-android_app/             # Android mobile edition (Kivy)
-  ├── main.py            # Android mobile app entry point
-  ├── downloader_engine.py # Modular background download engine
-  ├── buildozer.spec     # Android APK build configuration
-  ├── run_mobile_simulator.bat # Phone preview simulator
-  └── assets/            # Fonts, intent filters, and icons
-.github/workflows/       # Automated GitHub Actions APK build workflow
-requirements.txt         # Python dependencies
-run_app.bat              # Windows one-click launcher
+UniversalDownloader_Android/
+├── assets/
+│   ├── fonts/
+│   │   └── Sebino-Soft-Regular.ttf      # Custom font
+│   ├── icon.png                         # App logo icon
+│   ├── icon_gold.png                    # Brand vector logo
+│   └── intent_filter.xml                # Android social media share menu hook
+├── .github/
+│   └── workflows/
+│       └── build_apk.yml                # CI/CD automated cloud APK builder
+├── tests/
+│   └── test_regression.py               # Automated unit & integration regression tests
+├── main.py                              # Mobile UI, gesture engine, 120 FPS render loop
+├── downloader_engine.py                 # Media extraction, format logic & Scoped Storage
+├── buildozer.spec                       # Buildozer release build specification
+├── requirements.txt                     # Python dependencies
+├── run_mobile_simulator.bat             # One-click Windows mobile viewport launcher
+├── .gitignore                           # Excludes build outputs, keys, and cache
+└── README.md                            # Documentation and build setup
 ```
 
-## License
+---
 
-MIT — see [LICENSE](LICENSE).
+## 💻 Running the Desktop Simulator
+You can run and test the complete mobile interface on Windows, macOS, or Linux:
+
+1. **Install Python 3.10 or 3.11**.
+2. **Install dependencies**:
+   ```bash
+   pip install -r requirements.txt
+   ```
+3. **Launch the simulator**:
+   ```bash
+   python main.py
+   # Or on Windows, double-click run_mobile_simulator.bat
+   ```
+
+---
+
+## 🧪 Running Automated Tests
+Run the test suite to verify security, URL parsing, TLS rejection, and format operations:
+```bash
+python -m unittest tests/test_regression.py
+```
+
+---
+
+## 🔨 Building the Android APK
+
+### Option A: Cloud Build with GitHub Actions (Recommended)
+1. Push this project to your GitHub repository.
+2. In your repository on GitHub, navigate to **Settings > Secrets and variables > Actions**.
+3. Configure mandatory release signing secrets for production releases:
+   - `RELEASE_KEYSTORE_BASE64`: Base64-encoded string of your `.keystore` file (`base64 -w 0 my-release-key.keystore`).
+   - `RELEASE_KEYSTORE_PASSWD`: Keystore password.
+   - `RELEASE_KEYALIAS`: Key alias.
+   - `RELEASE_KEYALIAS_PASSWD`: Key alias password.
+   - `RELEASE_CERT_SHA256`: Independent trusted SHA-256 certificate fingerprint (64 hex characters) matching the actual signing identity.
+   *(All 5 secrets are mandatory for production releases. If omitted, the workflow builds a secure debug APK).*
+4. Run the **Build Android APK** workflow in GitHub Actions.
+
+### Option B: Local Build with Buildozer (Linux / WSL2 / macOS)
+1. Generate your private release keystore (keep this file private and never commit it):
+   ```bash
+   keytool -genkeypair -v -keystore release.keystore -alias mykey -keyalg RSA -keysize 2048 -validity 10000 -storetype PKCS12
+   ```
+2. Export your signing environment variables:
+   ```bash
+   export P4A_RELEASE_KEYSTORE=release.keystore
+   export P4A_RELEASE_KEYSTORE_PASSWD="YourPassword"
+   export P4A_RELEASE_KEYALIAS="mykey"
+   export P4A_RELEASE_KEYALIAS_PASSWD="YourPassword"
+   ```
+3. Build the signed release APK:
+   ```bash
+   buildozer -v android release
+   ```
+4. The generated APK will be placed in the `./bin/` folder.

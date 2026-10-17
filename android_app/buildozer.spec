@@ -19,7 +19,7 @@ source.include_exts = py,png,jpg,ttf,json,xml
 source.include_patterns = assets/*,assets/fonts/*
 
 # (list) List of directory to exclude (let empty to not exclude anything)
-source.exclude_dirs = tests, bin, .buildozer, build, dist, static, .github, android_app, venv_android
+source.exclude_dirs = tests, tools, bin, .buildozer, build, dist, static, .github, android_app, venv_android
 
 # (list) List of exclusions using pattern matching
 source.exclude_patterns = *.spec, *.exe, *.bat, gui_app.py, server.py, build_exe.py, requirements-desktop.txt, *.keystore, *.jks, *.p12, *.key

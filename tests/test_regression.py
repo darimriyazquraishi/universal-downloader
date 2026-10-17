@@ -354,6 +354,7 @@ class TestBuildozerAndWorkflowPaths(unittest.TestCase):
         self.assertIn("buildozer.spec", wf)
         self.assertIn("requirements.txt", wf)
         self.assertIn("tests/**", wf)
+        self.assertIn("tools/**", wf, "Changes to release validation tooling must trigger CI")
         self.assertIn(".github/workflows/build_apk.yml", wf)
 
         # Verify obsolete android_app/ directory references are removed
@@ -435,13 +436,27 @@ class TestBuildozerAndWorkflowPaths(unittest.TestCase):
         # 3. Target API 36, package ID, and non-debuggable verification
         self.assertIn("targetSdkVersion:'36'", wf)
         self.assertIn("com.universalmedia.universaldownloader", wf)
-        self.assertIn("application-debuggable", wf)
+        self.assertIn('dump xmltree "$FINAL_APK" AndroidManifest.xml', wf)
+        self.assertIn("android:debuggable", wf)
+        self.assertIn("Compiled manifest contains no true android:debuggable value", wf)
 
         # 4. Reproducible build: pinned versions of Buildozer, Cython, and python-for-android
         self.assertIn("buildozer==1.6.0", wf)
         self.assertIn("cython==0.29.37", wf)
         self.assertIn("virtualenv==21.14.8", wf)
-        self.assertIn("python-for-android==2026.5.9", wf)
+        # Buildozer resolves python-for-android from the pinned p4a.branch in buildozer.spec;
+        # a separate pip-installed copy must not be patched or mistaken for the build checkout.
+        self.assertNotIn("python-for-android==2026.5.9", wf)
+        self.assertNotIn("site.getsitepackages()", wf)
+        self.assertNotIn("Successfully patched", wf)
+        self.assertIn("ndk;28.2.13676358", wf)
+        self.assertIn("ANDROIDSDK=$BUILD_SDK", wf)
+        self.assertIn("ANDROIDNDK=$BUILD_NDK", wf)
+        self.assertIn('"$BUILD_SDK/cmdline-tools/latest/bin/sdkmanager"', wf)
+        self.assertIn('"$BUILD_SDK/cmdline-tools/latest/source.properties"', wf)
+        self.assertIn('"$BUILD_SDK/platforms/android-36/android.jar"', wf)
+        self.assertIn("tools/check_elf_alignment.py", wf)
+        self.assertIn("android-ndk-r28c", wf)
 
 
 # ===========================================================================
@@ -941,59 +956,84 @@ class TestArea8FolderAndFileOpeningAnd16KbAlignment(unittest.TestCase):
             self.assertNotIn("file://", code.replace("file:///", ""), "Unsafe file:// scheme usage in main.py")
 
     def test_elf_16kb_page_alignment_detection(self):
-        """
-        Verify the 16 KB ELF segment validator correctly detects 4 KB vs 16 KB alignment.
-        """
+        """Use the same strict ELF validator that the release workflow runs."""
+        import struct
+        from tools.check_elf_alignment import inspect_elf
+
+        def make_elf64(p_align, p_offset=0, p_vaddr=0, machine=183, elf_class=2):
+            data = bytearray(64 + 56)
+            data[0:4] = b"\x7fELF"
+            data[4] = elf_class
+            data[5] = 1  # little endian
+            data[6] = 1  # current ELF identification version
+            struct.pack_into("<H", data, 16, 3)  # ET_DYN
+            struct.pack_into("<H", data, 18, machine)
+            struct.pack_into("<I", data, 20, 1)  # e_version
+            struct.pack_into("<Q", data, 32, 64)  # e_phoff
+            struct.pack_into("<H", data, 52, 64)  # e_ehsize
+            struct.pack_into("<H", data, 54, 56)  # e_phentsize
+            struct.pack_into("<H", data, 56, 1)   # e_phnum
+            # PT_LOAD, PF_R | PF_X, offset, vaddr, paddr, filesz, memsz, align
+            struct.pack_into("<IIQQQQQQ", data, 64, 1, 5, p_offset, p_vaddr, p_vaddr, len(data), len(data), p_align)
+            return bytes(data)
+
+        aligned = make_elf64(p_align=16384, p_offset=0, p_vaddr=0)
+        self.assertEqual(inspect_elf(aligned, "aligned.so", "arm64-v8a"), [])
+
+        bad_4kb = make_elf64(p_align=4096)
+        self.assertTrue(inspect_elf(bad_4kb, "4kb.so", "arm64-v8a"))
+
+        misaligned = make_elf64(p_align=16384, p_offset=0, p_vaddr=4096)
+        self.assertTrue(inspect_elf(misaligned, "misaligned.so", "arm64-v8a"))
+
+        wrong_arch = make_elf64(p_align=16384, machine=62)
+        self.assertTrue(inspect_elf(wrong_arch, "wrong-arch.so", "arm64-v8a"))
+
+        wrong_class = make_elf64(p_align=16384, elf_class=1)
+        self.assertTrue(inspect_elf(wrong_class, "32bit.so", "arm64-v8a"))
+
+    def test_elf_apk_validator_rejects_missing_or_malformed_libraries(self):
+        """The production validator must fail closed for empty/malformed APK contents."""
+        from tools.check_elf_alignment import inspect_apk
         import struct
 
-        def create_mock_elf64(p_align, p_offset, p_vaddr):
-            # 64-byte ELF header
-            elf_hdr = bytearray(64)
-            elf_hdr[0:4] = b"\x7fELF"
-            elf_hdr[4] = 2 # ELFCLASS64
-            elf_hdr[5] = 1 # ELFDATA2LSB
-            struct.pack_into("<Q", elf_hdr, 32, 64) # e_phoff = 64
-            struct.pack_into("<H", elf_hdr, 54, 56) # e_phentsize = 56
-            struct.pack_into("<H", elf_hdr, 56, 1)  # e_phnum = 1
+        def make_elf64():
+            data = bytearray(120)
+            data[0:4] = b"\x7fELF"
+            data[4] = 2
+            data[5] = 1
+            data[6] = 1
+            struct.pack_into("<H", data, 16, 3)
+            struct.pack_into("<H", data, 18, 183)
+            struct.pack_into("<I", data, 20, 1)
+            struct.pack_into("<Q", data, 32, 64)
+            struct.pack_into("<H", data, 52, 64)
+            struct.pack_into("<H", data, 54, 56)
+            struct.pack_into("<H", data, 56, 1)
+            struct.pack_into("<IIQQQQQQ", data, 64, 1, 5, 0, 0, 0, len(data), len(data), 16384)
+            return bytes(data)
 
-            # 56-byte Program Header (PT_LOAD = 1)
-            ph = bytearray(56)
-            struct.pack_into("<I", ph, 0, 1)        # p_type = 1 (PT_LOAD)
-            struct.pack_into("<Q", ph, 8, p_offset) # p_offset
-            struct.pack_into("<Q", ph, 16, p_vaddr) # p_vaddr
-            struct.pack_into("<Q", ph, 48, p_align) # p_align
-            return bytes(elf_hdr + ph)
+        with tempfile.TemporaryDirectory() as tmp:
+            empty_apk = os.path.join(tmp, "empty.apk")
+            with zipfile.ZipFile(empty_apk, "w"):
+                pass
+            empty_results, empty_count = inspect_apk(empty_apk, "arm64-v8a")
+            self.assertEqual(empty_count, 0)
+            self.assertTrue(any(errors for _, errors in empty_results))
 
-        def is_16kb(data):
-            e_phoff = struct.unpack_from("<Q", data, 32)[0]
-            e_phentsize = struct.unpack_from("<H", data, 54)[0]
-            e_phnum = struct.unpack_from("<H", data, 56)[0]
-            for i in range(e_phnum):
-                off = e_phoff + i * e_phentsize
-                p_type = struct.unpack_from("<I", data, off)[0]
-                if p_type == 1:
-                    p_offset = struct.unpack_from("<Q", data, off + 8)[0]
-                    p_vaddr = struct.unpack_from("<Q", data, off + 16)[0]
-                    p_align = struct.unpack_from("<Q", data, off + 48)[0]
-                    if p_align < 16384 or (p_vaddr - p_offset) % 16384 != 0:
-                        return False
-            return True
+            malformed_apk = os.path.join(tmp, "malformed.apk")
+            with zipfile.ZipFile(malformed_apk, "w") as archive:
+                archive.writestr("lib/arm64-v8a/libbroken.so", b"not an ELF")
+            malformed_results, malformed_count = inspect_apk(malformed_apk, "arm64-v8a")
+            self.assertEqual(malformed_count, 1)
+            self.assertTrue(any(errors for _, errors in malformed_results))
 
-        # 4 KB aligned segment: should FAIL 16 KB validation
-        elf_4kb = create_mock_elf64(p_align=4096, p_offset=0, p_vaddr=0)
-        self.assertFalse(is_16kb(elf_4kb))
-
-        # Misaligned (vaddr - offset) % 16384 != 0: should FAIL 16 KB validation
-        elf_misaligned = create_mock_elf64(p_align=16384, p_offset=0x1000, p_vaddr=0x2000) # (0x2000 - 0x1000) % 16384 != 0
-        self.assertFalse(is_16kb(elf_misaligned))
-
-        # 16 KB aligned segment: should PASS 16 KB validation
-        elf_16kb = create_mock_elf64(p_align=16384, p_offset=0x4000, p_vaddr=0x8000) # (0x8000 - 0x4000) % 16384 == 0
-        self.assertTrue(is_16kb(elf_16kb))
-
-        # 64 KB aligned segment: should PASS 16 KB validation
-        elf_64kb = create_mock_elf64(p_align=65536, p_offset=0, p_vaddr=0)
-        self.assertTrue(is_16kb(elf_64kb))
+            valid_apk = os.path.join(tmp, "valid.apk")
+            with zipfile.ZipFile(valid_apk, "w") as archive:
+                archive.writestr("lib/arm64-v8a/libexample.so", make_elf64())
+            valid_results, valid_count = inspect_apk(valid_apk, "arm64-v8a")
+            self.assertEqual(valid_count, 1)
+            self.assertFalse(any(errors for _, errors in valid_results))
 
     def test_ci_workflow_runs_test_suite_once_and_fails_on_nonzero(self):
         """
