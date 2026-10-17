@@ -1242,8 +1242,34 @@ class ManagerScreen(Screen):
                     except Exception:
                         pass
 
+                    # Attempt to resolve MediaStore content URI first for clean Android 10+ player support
+                    content_uri = None
+                    try:
+                        MediaStore = autoclass('android.provider.MediaStore')
+                        ContentUris = autoclass('android.content.ContentUris')
+                        table = MediaStore.Video.Media.EXTERNAL_CONTENT_URI if is_video else (
+                            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI if is_audio else MediaStore.Files.getContentUri("external")
+                        )
+                        cursor = currentActivity.getContentResolver().query(
+                            table,
+                            ["_id"],
+                            "_data = ?",
+                            [path],
+                            None
+                        )
+                        if cursor and cursor.moveToFirst():
+                            media_id = cursor.getLong(0)
+                            content_uri = ContentUris.withAppendedId(table, media_id)
+                            cursor.close()
+                    except Exception:
+                        pass
+
                     intent = Intent(Intent.ACTION_VIEW)
-                    intent.setDataAndType(Uri.fromFile(file_obj), mime)
+                    if content_uri:
+                        intent.setDataAndType(content_uri, mime)
+                    else:
+                        intent.setDataAndType(Uri.fromFile(file_obj), mime)
+
                     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     
@@ -1288,7 +1314,20 @@ class ManagerScreen(Screen):
                         except Exception:
                             pass
 
-                    # Priority 2: Use file explorer intent
+                    # Priority 2: Use DocumentsContract directory view
+                    try:
+                        rel_doc = folder.replace("/storage/emulated/0/", "").strip("/")
+                        doc_uri = Uri.parse(f"content://com.android.externalstorage.documents/document/primary:{rel_doc}")
+                        intent = Intent(Intent.ACTION_VIEW)
+                        intent.setDataAndType(doc_uri, "vnd.android.document/directory")
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        currentActivity.startActivity(intent)
+                        return
+                    except Exception:
+                        pass
+
+                    # Priority 3: Use file explorer intent
                     StrictMode = autoclass('android.os.StrictMode')
                     builder = autoclass('android.os.StrictMode$VmPolicy$Builder')()
                     StrictMode.setVmPolicy(builder.build())
@@ -1602,7 +1641,20 @@ class UniversalDownloaderMobileApp(App):
                         pass
                     resolved_path = engine.uri_to_path(uri)
                     if resolved_path:
-                        Clock.schedule_once(lambda dt: self.settings_screen.set_active_path(resolved_path), 0)
+                        verified = engine.ensure_valid_download_dir(resolved_path)
+                        if verified == resolved_path:
+                            Clock.schedule_once(lambda dt: self.settings_screen.set_active_path(verified), 0)
+                        else:
+                            def notify_restricted(dt):
+                                self.settings_screen.set_active_path(verified)
+                                self.settings_screen.lbl_active_path.text = f"{verified} (Default: selected folder restricted by Android)"
+                            Clock.schedule_once(notify_restricted, 0)
+                    else:
+                        pub = engine.get_default_download_dir()
+                        def notify_unresolved(dt):
+                            self.settings_screen.set_active_path(pub)
+                            self.settings_screen.lbl_active_path.text = f"{pub} (SAF URI not direct-filesystem writable)"
+                        Clock.schedule_once(notify_unresolved, 0)
             except Exception:
                 pass
 

@@ -154,15 +154,27 @@ def ensure_valid_download_dir(dir_path=None):
     return get_default_download_dir()
 
 def uri_to_path(uri_obj):
-    """Convert Android Storage Access Framework content/tree Uri to filesystem path."""
+    """Convert Android Storage Access Framework content/tree Uri to filesystem path with traversal protection."""
+    if not uri_obj:
+        return None
     try:
         uri_str = uri_obj.toString() if hasattr(uri_obj, 'toString') else str(uri_obj)
+        if not uri_str:
+            return None
         import urllib.parse
         decoded = urllib.parse.unquote(uri_str)
+
+        # Primary shared external storage
         if "primary:" in decoded:
             rel = decoded.split("primary:")[-1].strip("/")
             full = f"/storage/emulated/0/{rel}" if rel else "/storage/emulated/0"
-            return os.path.normpath(full).replace("\\", "/")
+            norm = os.path.normpath(full).replace("\\", "/")
+            # Path traversal check: must stay within /storage/emulated/0
+            if norm == "/storage/emulated/0" or norm.startswith("/storage/emulated/0/"):
+                return norm
+            return "/storage/emulated/0"
+
+        # Secondary storage (e.g. micro SD cards)
         elif "/tree/" in decoded:
             part = decoded.split("/tree/")[-1]
             if ":" in part:
@@ -170,11 +182,26 @@ def uri_to_path(uri_obj):
                 storage_id = storage_id.strip("/")
                 rel = rel.strip("/")
                 if storage_id == "primary":
-                    return os.path.normpath(f"/storage/emulated/0/{rel}").replace("\\", "/")
+                    norm = os.path.normpath(f"/storage/emulated/0/{rel}").replace("\\", "/")
+                    if norm == "/storage/emulated/0" or norm.startswith("/storage/emulated/0/"):
+                        return norm
+                    return "/storage/emulated/0"
                 else:
-                    return os.path.normpath(f"/storage/{storage_id}/{rel}").replace("\\", "/")
+                    norm = os.path.normpath(f"/storage/{storage_id}/{rel}").replace("\\", "/")
+                    if norm == f"/storage/{storage_id}" or norm.startswith(f"/storage/{storage_id}/"):
+                        return norm
+                    return f"/storage/{storage_id}"
+
+        # Standard file:// scheme
         elif uri_str.startswith("file://"):
-            return uri_str[7:]
+            raw_path = uri_str[7:]
+            norm = os.path.normpath(raw_path).replace("\\", "/")
+            return norm
+
+        # Direct absolute filesystem path
+        elif os.path.isabs(uri_str) and not uri_str.startswith("content://"):
+            norm = os.path.normpath(uri_str).replace("\\", "/")
+            return norm
     except Exception:
         pass
     return None
@@ -362,6 +389,8 @@ def detect_platform(url):
         return "Vimeo"
     elif "soundcloud.com" in u:
         return "SoundCloud"
+    elif "dailymotion.com" in u or "dai.ly" in u:
+        return "Dailymotion"
     elif "twitch.tv" in u:
         return "Twitch"
     return "Universal Web"

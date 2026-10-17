@@ -2,18 +2,62 @@ name: Build Android APK
 
 on:
   workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Build type (release or debug)'
+        required: true
+        default: 'release'
+        type: choice
+        options:
+          - release
+          - debug
   push:
     branches:
       - main
     paths:
       - 'android_app/**'
       - '.github/workflows/build_apk.yml'
+      - 'tests/**'
+      - 'requirements.txt'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'android_app/**'
+      - '.github/workflows/build_apk.yml'
+      - 'tests/**'
+      - 'requirements.txt'
 
 permissions:
   contents: write
 
 jobs:
+  test:
+    name: Run Regression & Security Tests
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Test Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r android_app/requirements.txt
+          pip install certifi yt-dlp requests
+
+      - name: Run Test Suite
+        run: |
+          python -m unittest discover -s tests -p "test_*.py"
+
   build-apk:
+    name: Build Android APK
+    needs: test
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout Repository
@@ -37,107 +81,137 @@ jobs:
 
       - name: Install Buildozer & Dependencies
         run: |
-          pip install --upgrade pip
+          python -m pip install --upgrade pip
           pip install buildozer cython virtualenv
 
-      - name: Setup Release Keystore from Secrets
-        env:
-          KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
-          KEYSTORE_PASS: ${{ secrets.RELEASE_KEYSTORE_PASSWD }}
-          KEY_ALIAS: ${{ secrets.RELEASE_KEYALIAS }}
+      - name: Determine Build Type
+        id: mode
         run: |
-          mkdir -p ~/.keystores
-          if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "Loading signing keystore from GitHub Secrets..."
-            echo "$KEYSTORE_BASE64" | base64 -d > ~/.keystores/release.keystore
-          elif [ -f android_app/release.keystore ]; then
-            echo "Using local release keystore..."
-            cp android_app/release.keystore ~/.keystores/release.keystore
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "build_mode=debug" >> $GITHUB_OUTPUT
+            echo "Selected Build Mode: debug (Pull Request)"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "build_mode=${{ github.event.inputs.build_type }}" >> $GITHUB_OUTPUT
+            echo "Selected Build Mode: ${{ github.event.inputs.build_type }} (Manual Dispatch)"
           else
-            echo "No keystore secret found. Generating ephemeral build keystore for artifact generation..."
-            keytool -genkeypair -v \
-              -keystore ~/.keystores/release.keystore \
-              -alias "${KEY_ALIAS:-universalmedia}" \
-              -keyalg RSA \
-              -keysize 2048 \
-              -validity 10000 \
-              -storepass "${KEYSTORE_PASS:-UniversalBuild2026!}" \
-              -keypass "${KEYSTORE_PASS:-UniversalBuild2026!}" \
-              -dname "CN=Universal Downloader, OU=Production, O=Universal Media, L=New York, ST=NY, C=US" \
-              -storetype PKCS12
+            echo "build_mode=release" >> $GITHUB_OUTPUT
+            echo "Selected Build Mode: release (Push to Main)"
           fi
 
+      - name: Clean Previous Build Artifacts
+        run: |
+          rm -rf android_app/bin dist_apk
+          mkdir -p dist_apk
+
+      - name: Validate Release Secrets & Setup Keystore
+        if: steps.mode.outputs.build_mode == 'release'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWD: ${{ secrets.RELEASE_KEYSTORE_PASSWD }}
+          KEYALIAS: ${{ secrets.RELEASE_KEYALIAS }}
+          KEYALIAS_PASSWD: ${{ secrets.RELEASE_KEYALIAS_PASSWD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWD" ] || [ -z "$KEYALIAS" ] || [ -z "$KEYALIAS_PASSWD" ]; then
+            echo "::error::Production release requires all 4 secrets: RELEASE_KEYSTORE_BASE64, RELEASE_KEYSTORE_PASSWD, RELEASE_KEYALIAS, and RELEASE_KEYALIAS_PASSWD."
+            echo "::error::Failing safely. Refusing to build an unsigned or ephemerally signed production release."
+            exit 1
+          fi
+
+          mkdir -p ~/.keystores
+          echo "$KEYSTORE_BASE64" | base64 -d > ~/.keystores/release.keystore
+          chmod 600 ~/.keystores/release.keystore
+          echo "Production release keystore configured securely."
+
       - name: Build Release APK with Buildozer
+        if: steps.mode.outputs.build_mode == 'release'
         working-directory: ./android_app
         env:
           P4A_RELEASE_KEYSTORE: /home/runner/.keystores/release.keystore
-          P4A_RELEASE_KEYSTORE_PASSWD: ${{ secrets.RELEASE_KEYSTORE_PASSWD || 'UniversalBuild2026!' }}
-          P4A_RELEASE_KEYALIAS: ${{ secrets.RELEASE_KEYALIAS || 'universalmedia' }}
-          P4A_RELEASE_KEYALIAS_PASSWD: ${{ secrets.RELEASE_KEYALIAS_PASSWD || secrets.RELEASE_KEYSTORE_PASSWD || 'UniversalBuild2026!' }}
+          P4A_RELEASE_KEYSTORE_PASSWD: ${{ secrets.RELEASE_KEYSTORE_PASSWD }}
+          P4A_RELEASE_KEYALIAS: ${{ secrets.RELEASE_KEYALIAS }}
+          P4A_RELEASE_KEYALIAS_PASSWD: ${{ secrets.RELEASE_KEYALIAS_PASSWD }}
         run: |
           yes | buildozer -v android release
 
-      - name: Production Align & Sign APK with apksigner (v1, v2, v3 schemes)
+      - name: Production Align & Sign APK with apksigner
+        if: steps.mode.outputs.build_mode == 'release'
         env:
-          KEY_PASS: ${{ secrets.RELEASE_KEYSTORE_PASSWD || 'UniversalBuild2026!' }}
-          KEY_ALIAS: ${{ secrets.RELEASE_KEYALIAS || 'universalmedia' }}
+          KEY_PASS: ${{ secrets.RELEASE_KEYALIAS_PASSWD }}
+          KEY_ALIAS: ${{ secrets.RELEASE_KEYALIAS }}
+          KS_PASS: ${{ secrets.RELEASE_KEYSTORE_PASSWD }}
         run: |
           APKSIGNER=$(find $ANDROID_HOME/build-tools -name apksigner | sort -V | tail -n 1)
           ZIPALIGN=$(find $ANDROID_HOME/build-tools -name zipalign | sort -V | tail -n 1)
           echo "Found apksigner at: $APKSIGNER"
           echo "Found zipalign at: $ZIPALIGN"
 
-          mkdir -p dist_apk
-          for apk in android_app/bin/*.apk; do
-            echo "Processing $apk..."
-            target_apk="$apk"
-            if [[ "$apk" == *"-unsigned.apk"* ]]; then
-              aligned_apk="${apk/-unsigned.apk/-aligned.apk}"
-              $ZIPALIGN -f -v -p 4 "$apk" "$aligned_apk"
-              target_apk="$aligned_apk"
-            elif [[ "$apk" == *"-unaligned.apk"* ]]; then
-              aligned_apk="${apk/-unaligned.apk/-aligned.apk}"
-              $ZIPALIGN -f -v -p 4 "$apk" "$aligned_apk"
-              target_apk="$aligned_apk"
-            fi
+          RELEASE_APKS=(android_app/bin/*.apk)
+          if [ ! -f "${RELEASE_APKS[0]}" ]; then
+            echo "::error::No APK produced in android_app/bin by Buildozer!"
+            exit 1
+          fi
 
-            echo "Signing $target_apk with release keystore..."
-            $APKSIGNER sign \
-              --ks /home/runner/.keystores/release.keystore \
-              --ks-key-alias "$KEY_ALIAS" \
-              --ks-pass "pass:$KEY_PASS" \
-              --key-pass "pass:$KEY_PASS" \
-              --v1-signing-enabled true \
-              --v2-signing-enabled true \
-              --v3-signing-enabled true \
-              --v4-signing-enabled false \
-              "$target_apk"
-            $APKSIGNER verify --verbose "$target_apk"
-            cp "$target_apk" dist_apk/UniversalDownloader-v1.1.0.apk
-          done
-          echo "Final release asset ready:"
+          target_apk="${RELEASE_APKS[0]}"
+          echo "Processing generated APK: $target_apk"
+
+          if [[ "$target_apk" == *"-unsigned.apk"* ]] || [[ "$target_apk" == *"-unaligned.apk"* ]]; then
+            aligned_apk="${target_apk/-unsigned.apk/-aligned.apk}"
+            aligned_apk="${aligned_apk/-unaligned.apk/-aligned.apk}"
+            $ZIPALIGN -f -v -p 4 "$target_apk" "$aligned_apk"
+            target_apk="$aligned_apk"
+          fi
+
+          echo "Signing $target_apk with release keystore..."
+          $APKSIGNER sign \
+            --ks /home/runner/.keystores/release.keystore \
+            --ks-key-alias "$KEY_ALIAS" \
+            --ks-pass "pass:$KS_PASS" \
+            --key-pass "pass:$KEY_PASS" \
+            --v1-signing-enabled true \
+            --v2-signing-enabled true \
+            --v3-signing-enabled true \
+            --v4-signing-enabled false \
+            "$target_apk"
+
+          $APKSIGNER verify --verbose "$target_apk"
+          cp "$target_apk" dist_apk/UniversalDownloader-v1.1.0.apk
+          echo "Final verified release APK: dist_apk/UniversalDownloader-v1.1.0.apk"
           ls -la dist_apk/
+
+      - name: Build Debug APK with Buildozer
+        if: steps.mode.outputs.build_mode == 'debug'
+        working-directory: ./android_app
+        run: |
+          yes | buildozer -v android debug
+          DEBUG_APKS=(bin/*.apk)
+          if [ ! -f "${DEBUG_APKS[0]}" ]; then
+            echo "::error::No debug APK produced in android_app/bin by Buildozer!"
+            exit 1
+          fi
+          cp "${DEBUG_APKS[0]}" ../dist_apk/UniversalDownloader-v1.1.0-debug.apk
+          echo "Final debug APK: dist_apk/UniversalDownloader-v1.1.0-debug.apk"
+          ls -la ../dist_apk/
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: UniversalDownloader-Android-APK
+          name: ${{ steps.mode.outputs.build_mode == 'release' && 'UniversalDownloader-Android-Release-APK' || 'UniversalDownloader-Android-Debug-APK' }}
           path: dist_apk/*.apk
+          if-no-files-found: error
 
-      - name: Create GitHub Release with APK
+      - name: Create GitHub Release with Production APK
         uses: softprops/action-gh-release@v2
-        if: github.ref == 'refs/heads/main'
+        if: steps.mode.outputs.build_mode == 'release' && github.ref == 'refs/heads/main'
         with:
           tag_name: v1.1.0-mobile
           name: Universal Downloader Android APK v1.1.0 (Production Release)
           body: |
             ### 📱 Universal Downloader for Android (v1.1.0) - Production Release
-            - **Google Play Protect Compliance**: Transitioned to an official `release` build, stripping `android:debuggable="true"` from the AndroidManifest.
-            - **Permanent Cryptographic Identity**: Signed with a persistent 2048-bit RSA PKCS#12 release keystore across APK Signature Schemes v1, v2, and v3 under package domain `com.universalmedia`.
-            - **Modern Scoped Storage Permissions**: Cleaned application permissions, removing legacy `WRITE_EXTERNAL_STORAGE` for full Android 13/14/15 Scoped Storage & MediaStore compliance.
-            - **Smart Clipboard & Share Extraction**: Improved URL parser to extract links from shared social text even with intro titles or surrounding copy.
-            - **Clean Download Manager**: Fixed first-launch history initialization to guarantee zero foreign media seeding.
-            - **High-Refresh 120 FPS Fluidity**: Preserved zero-latency rendering, fluid list scrolling, and zero-conflict gesture isolation.
-          files: dist_apk/*.apk
+            - **Google Play Protect Compliance**: Hardened release build with verified TLS certificate validation.
+            - **Secure Cryptographic Signing**: Signed with release keystore across APK Signature Schemes v1, v2, and v3 under package domain `com.universalmedia`.
+            - **Scoped Storage & MediaStore Compliance**: Least-privilege permissions (`INTERNET`, `ACCESS_NETWORK_STATE`).
+            - **Zero Debug Flags**: `android:debuggable="false"` strictly enforced.
+            - **Continuous Automated Testing**: 100% test pass rate in CI prior to binary artifact packaging.
+          files: dist_apk/UniversalDownloader-v1.1.0.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
