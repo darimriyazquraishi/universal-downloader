@@ -1,0 +1,20 @@
+# Buildozer & Android build outputs
+.buildozer/
+bin/
+*.apk
+*.aab
+__pycache__/
+*.pyc
+
+# Signing keys & secrets (NEVER commit these)
+*.keystore
+*.jks
+*.p12
+*.pem
+*.key
+release.keystore
+
+# Local test & simulator files
+downloads/
+*.log
+.DS_Store
