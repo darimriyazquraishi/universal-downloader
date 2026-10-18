@@ -87,12 +87,72 @@ class TestUrlValidationAndPlatforms(unittest.TestCase):
             ("https://soundcloud.com/artist/sample-track", "SoundCloud"),
             ("https://vimeo.com/123456789", "Vimeo"),
             ("https://www.dailymotion.com/video/x12345", "Dailymotion"),
+            ("https://www.mukaplay.com/dynps/share/DBVZTRUQQUEc123", "MukaPlay"),
+            ("https://muka-box.com/share/track123", "MukaPlay"),
+            ("https://muka.com/song/456", "MukaPlay"),
             ("https://cdn.example.org/files/sample_video.mp4", "Universal Web"),
         ]
         for url, expected in cases:
             self.assertEqual(engine.detect_platform(url), expected, f"Platform mismatch for {url}")
 
+    def test_mukaplay_resolution(self):
+        # 1. Non-Muka URL returns original untouched
+        yt_url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        resolved, title = engine.resolve_mukaplay_url(yt_url)
+        self.assertEqual(resolved, yt_url)
+        self.assertIsNone(title)
+
+        # 2. Mock SSR HTML with __INITIAL_STATE__ containing ytData
+        mock_html_state = '''
+        <html>
+        <head>
+            <meta property="og:title" content="Fallback Track Title" />
+        </head>
+        <body>
+            <script>
+            window.__INITIAL_STATE__ = {
+                "ytData": {"i": "LA8n8INoMOI", "tl": "Muka State Title"}
+            };
+            </script>
+        </body>
+        </html>
+        '''
+        class MockRespState:
+            def __enter__(self): return self
+            def __exit__(self, *args): pass
+            def read(self): return mock_html_state.encode('utf-8')
+
+        with patch("urllib.request.urlopen", return_value=MockRespState()):
+            res_url, res_title = engine.resolve_mukaplay_url("https://www.mukaplay.com/dynps/share/sample_key")
+            self.assertEqual(res_url, "https://www.youtube.com/watch?v=LA8n8INoMOI")
+            self.assertEqual(res_title, "Muka State Title")
+
+        # 3. Mock HTML with og:image YouTube thumbnail fallback
+        mock_html_og = '''
+        <html>
+        <head>
+            <meta property="og:title" content="Muka OG Title" />
+            <meta property="og:image" content="https://i.ytimg.com/vi/dQw4w9WgXcQ/hq720.jpg" />
+        </head>
+        </html>
+        '''
+        class MockRespOg:
+            def __enter__(self): return self
+            def __exit__(self, *args): pass
+            def read(self): return mock_html_og.encode('utf-8')
+
+        with patch("urllib.request.urlopen", return_value=MockRespOg()):
+            res_url, res_title = engine.resolve_mukaplay_url("https://www.mukaplay.com/dynps/share/sample_og")
+            self.assertEqual(res_url, "https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+            self.assertEqual(res_title, "Muka OG Title")
+
     def test_url_structure_parsing(self):
+        # MukaPlay URL parses seamlessly through canonical resolution
+        with patch("downloader_engine.resolve_mukaplay_url", return_value=("https://www.youtube.com/watch?v=LA8n8INoMOI", "Test Track")):
+            muka_parsed = engine.parse_url_structure("https://www.mukaplay.com/dynps/share/sample")
+            self.assertTrue(muka_parsed["is_youtube"])
+            self.assertEqual(muka_parsed["video_id"], "LA8n8INoMOI")
+
         # Single video without playlist
         s = engine.parse_url_structure("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
         self.assertTrue(s["is_youtube"])

@@ -628,6 +628,81 @@ def save_settings(cfg):
     except Exception:
         pass
 
+def resolve_mukaplay_url(url):
+    """
+    Resolve Muka / MukaPlay dynamic share links to their underlying canonical media URL.
+    Extracts embedded YouTube video ID or direct media stream from the MukaPlay share page.
+    Returns (resolved_url, page_title).
+    """
+    if not url:
+        return url, None
+    u = str(url).strip()
+    if not any(domain in u.lower() for domain in ["mukaplay.com", "muka-box.com", "muka.com"]):
+        return u, None
+
+    try:
+        import ssl
+        import urllib.request
+        ctx = ssl.create_default_context()
+        try:
+            import certifi
+            ca_bundle = certifi.where()
+            if os.path.exists(ca_bundle):
+                ctx.load_verify_locations(ca_bundle)
+        except Exception:
+            pass
+
+        req = urllib.request.Request(u, headers={
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+        })
+        with urllib.request.urlopen(req, context=ctx, timeout=12) as resp:
+            html = resp.read().decode('utf-8', 'replace')
+
+        # Extract og:title if present
+        og_title = None
+        m_title = re.search(r'<meta\s+property=[\"\']og:title[\"\']\s+content=[\"\']([^\"\']+)[\"\']', html)
+        if m_title:
+            og_title = m_title.group(1).strip()
+
+        # 1. JSON ytData in __INITIAL_STATE__
+        m = re.search(r'\"ytData\"\s*:\s*\{([^}]+)\}', html)
+        if m:
+            block = '{' + m.group(1) + '}'
+            try:
+                data = json.loads(block)
+                if data.get('i'):
+                    return f"https://www.youtube.com/watch?v={data['i']}", (data.get('tl') or og_title)
+            except Exception:
+                pass
+            m_id = re.search(r'\"i\"\s*:\s*\"([a-zA-Z0-9_-]{11})\"', block)
+            if m_id:
+                return f"https://www.youtube.com/watch?v={m_id.group(1)}", og_title
+
+        # 2. General __INITIAL_STATE__ parse for videoId or youtube ID
+        m_yt_id = re.search(r'\"(?:videoId|ytId|youtubeId|video_id)\"\s*:\s*\"([a-zA-Z0-9_-]{11})\"', html)
+        if m_yt_id:
+            return f"https://www.youtube.com/watch?v={m_yt_id.group(1)}", og_title
+
+        # 3. YouTube thumbnail / poster
+        m_yt = re.search(r'i\.ytimg\.com/vi/([a-zA-Z0-9_-]{11})/', html)
+        if m_yt:
+            return f"https://www.youtube.com/watch?v={m_yt.group(1)}", og_title
+
+        # 4. og:video or direct media tag
+        m_vid = re.search(r'<meta\s+property=[\"\']og:video(?::url)?[\"\']\s+content=[\"\']([^\"\']+)[\"\']', html)
+        if m_vid:
+            return m_vid.group(1), og_title
+
+        # 5. Direct audio / video source tags
+        m_src = re.search(r'<(?:video|audio|source)[^>]+src=[\"\'](https?://[^\"\']+)[\"\']', html)
+        if m_src:
+            return m_src.group(1), og_title
+
+    except Exception:
+        pass
+
+    return u, None
+
 def parse_url_structure(url):
     """Detect if a URL contains a single video, a playlist, or a video within a YouTube Mix/Radio."""
     if not url:
@@ -639,7 +714,14 @@ def parse_url_structure(url):
             "has_both": False,
             "clean_video_url": None
         }
-    u = urllib.parse.urlparse(str(url))
+
+    canonical_url = url
+    if any(domain in str(url).lower() for domain in ["mukaplay.com", "muka-box.com", "muka.com"]):
+        resolved, _ = resolve_mukaplay_url(url)
+        if resolved:
+            canonical_url = resolved
+
+    u = urllib.parse.urlparse(str(canonical_url))
     qs = urllib.parse.parse_qs(u.query)
     is_yt = 'youtube.com' in u.netloc or 'youtu.be' in u.netloc
     
@@ -695,7 +777,9 @@ def clean_url(url, remove_playlist=False):
 
 def detect_platform(url):
     u = url.lower()
-    if "youtube.com" in u or "youtu.be" in u:
+    if "mukaplay.com" in u or "muka-box.com" in u or "muka.com" in u:
+        return "MukaPlay"
+    elif "youtube.com" in u or "youtu.be" in u:
         return "YouTube"
     elif "instagram.com" in u:
         return "Instagram"
@@ -756,10 +840,17 @@ def inspect_url(url, scope=None):
     scope: None (auto-detect), 'single' (force video only), 'playlist' (force entire playlist)
     """
     platform = detect_platform(url)
-    parsed = parse_url_structure(url)
+
+    target_url = url
+    muka_title = None
+    if platform == "MukaPlay":
+        resolved_url, muka_title = resolve_mukaplay_url(url)
+        if resolved_url:
+            target_url = resolved_url
+
+    parsed = parse_url_structure(target_url)
     
     # Auto-resolve scope if user has both video and playlist
-    target_url = url
     active_scope = "single"
     
     if parsed["has_both"]:
@@ -826,7 +917,7 @@ def inspect_url(url, scope=None):
         else:
             dur_str = "Media Clip"
 
-        media_title = info.get('title') or (valid[0]['title'] if valid else f"{platform} Media")
+        media_title = info.get('title') or muka_title or (valid[0]['title'] if valid else f"{platform} Media")
 
         # Rough size estimate for standard 1080p / MP4
         mb = max(8.0, (500000 * max(10, total_dur)) / (1024 * 1024))
@@ -842,6 +933,7 @@ def inspect_url(url, scope=None):
             "clean_video_url": parsed["clean_video_url"],
             "playlist_id": parsed["playlist_id"],
             "original_url": url,
+            "target_url": target_url,
             "track_count": len(valid),
             "duration_str": dur_str,
             "total_duration": total_dur,

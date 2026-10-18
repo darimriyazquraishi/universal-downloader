@@ -91,7 +91,9 @@ def save_destination(dest_path):
 # Platform detection helper
 def detect_platform(url):
     u = url.lower()
-    if "youtube.com" in u or "youtu.be" in u:
+    if "mukaplay.com" in u or "muka-box.com" in u or "muka.com" in u:
+        return "MukaPlay"
+    elif "youtube.com" in u or "youtu.be" in u:
         return "YouTube"
     elif "instagram.com" in u:
         return "Instagram"
@@ -113,9 +115,94 @@ def detect_platform(url):
         return "Twitch"
     return "Universal Web"
 
+def resolve_mukaplay_url(url):
+    """
+    Resolve Muka / MukaPlay dynamic share links to their underlying canonical media URL.
+    Extracts embedded YouTube video ID or direct media stream from the MukaPlay share page.
+    Returns (resolved_url, page_title).
+    """
+    if not url:
+        return url, None
+    u = str(url).strip()
+    if not any(domain in u.lower() for domain in ["mukaplay.com", "muka-box.com", "muka.com"]):
+        return u, None
+
+    try:
+        import ssl
+        import urllib.request
+        ctx = ssl.create_default_context()
+        try:
+            import certifi
+            ca_bundle = certifi.where()
+            if os.path.exists(ca_bundle):
+                ctx.load_verify_locations(ca_bundle)
+        except Exception:
+            pass
+
+        req = urllib.request.Request(u, headers={
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+        })
+        with urllib.request.urlopen(req, context=ctx, timeout=12) as resp:
+            html = resp.read().decode('utf-8', 'replace')
+
+        og_title = None
+        m_title = re.search(r'<meta\s+property=[\"\']og:title[\"\']\s+content=[\"\']([^\"\']+)[\"\']', html)
+        if m_title:
+            og_title = m_title.group(1).strip()
+
+        m = re.search(r'\"ytData\"\s*:\s*\{([^}]+)\}', html)
+        if m:
+            block = '{' + m.group(1) + '}'
+            try:
+                data = json.loads(block)
+                if data.get('i'):
+                    return f"https://www.youtube.com/watch?v={data['i']}", (data.get('tl') or og_title)
+            except Exception:
+                pass
+            m_id = re.search(r'\"i\"\s*:\s*\"([a-zA-Z0-9_-]{11})\"', block)
+            if m_id:
+                return f"https://www.youtube.com/watch?v={m_id.group(1)}", og_title
+
+        m_yt_id = re.search(r'\"(?:videoId|ytId|youtubeId|video_id)\"\s*:\s*\"([a-zA-Z0-9_-]{11})\"', html)
+        if m_yt_id:
+            return f"https://www.youtube.com/watch?v={m_yt_id.group(1)}", og_title
+
+        m_yt = re.search(r'i\.ytimg\.com/vi/([a-zA-Z0-9_-]{11})/', html)
+        if m_yt:
+            return f"https://www.youtube.com/watch?v={m_yt.group(1)}", og_title
+
+        m_vid = re.search(r'<meta\s+property=[\"\']og:video(?::url)?[\"\']\s+content=[\"\']([^\"\']+)[\"\']', html)
+        if m_vid:
+            return m_vid.group(1), og_title
+
+        m_src = re.search(r'<(?:video|audio|source)[^>]+src=[\"\'](https?://[^\"\']+)[\"\']', html)
+        if m_src:
+            return m_src.group(1), og_title
+
+    except Exception:
+        pass
+
+    return u, None
+
 def parse_url_structure(url):
     """Detect if a URL contains a single video, a playlist, or a video within a YouTube Mix/Radio."""
-    u = urllib.parse.urlparse(url)
+    if not url:
+        return {
+            "is_youtube": False,
+            "video_id": None,
+            "playlist_id": None,
+            "is_mix": False,
+            "has_both": False,
+            "clean_video_url": None
+        }
+
+    canonical_url = url
+    if any(domain in str(url).lower() for domain in ["mukaplay.com", "muka-box.com", "muka.com"]):
+        resolved, _ = resolve_mukaplay_url(url)
+        if resolved:
+            canonical_url = resolved
+
+    u = urllib.parse.urlparse(canonical_url)
     qs = urllib.parse.parse_qs(u.query)
     is_yt = 'youtube.com' in u.netloc or 'youtu.be' in u.netloc
     
@@ -1239,9 +1326,15 @@ class UniversalDownloaderApp(ctk.CTk):
 
     def fetch_analysis(self, url, scope=None):
         platform = detect_platform(url)
-        parsed = parse_url_structure(url)
-
         target_url = url
+        muka_title = None
+        if platform == "MukaPlay":
+            resolved_url, muka_title = resolve_mukaplay_url(url)
+            if resolved_url:
+                target_url = resolved_url
+
+        parsed = parse_url_structure(target_url)
+
         active_scope = "single"
         if parsed["has_both"]:
             if scope == "playlist":
@@ -1271,7 +1364,7 @@ class UniversalDownloaderApp(ctk.CTk):
             for e in entries:
                 if not e:
                     continue
-                t = e.get('title') or info.get('title') or f"{platform} Media"
+                t = e.get('title') or info.get('title') or muka_title or f"{platform} Media"
                 dur = e.get('duration') or 0
                 item_url = e.get('webpage_url') or e.get('url') or e.get('original_url')
                 if not item_url:
@@ -1296,9 +1389,9 @@ class UniversalDownloaderApp(ctk.CTk):
             elif total_dur > 0:
                 dur_str = f"{int(total_dur)}s"
             else:
-                dur_str = "Clip"
+                dur_str = "Media Clip"
 
-            media_title = info.get('title') or (valid[0]['title'] if valid else f"{platform} Media")
+            media_title = info.get('title') or muka_title or (valid[0]['title'] if valid else f"{platform} Media")
 
             return {
                 "title": media_title,
@@ -1310,6 +1403,7 @@ class UniversalDownloaderApp(ctk.CTk):
                 "clean_video_url": parsed["clean_video_url"],
                 "playlist_id": parsed["playlist_id"],
                 "original_url": url,
+                "target_url": target_url,
                 "track_count": len(valid),
                 "duration_str": dur_str,
                 "total_duration": total_dur,
@@ -1483,15 +1577,22 @@ class UniversalDownloaderApp(ctk.CTk):
         self.append_log(f"[QUEUE] Target directory: {dest_dir}")
         self.append_log(f"[QUEUE] Format profile: {download_type} ({q_tag})")
 
-        # Smart target URL resolution: Single video vs Playlist
-        parsed = parse_url_structure(url)
+        # Smart target URL resolution: Single video vs Playlist vs External platforms (MukaPlay)
         target_download_url = url
-        if hasattr(self, 'current_analysis') and self.current_analysis and self.current_analysis.get("has_both"):
-            if self.current_analysis.get("active_scope") == "single":
+        if hasattr(self, 'current_analysis') and self.current_analysis:
+            if self.current_analysis.get("target_url"):
+                target_download_url = self.current_analysis.get("target_url")
+            elif self.current_analysis.get("has_both") and self.current_analysis.get("active_scope") == "single":
                 target_download_url = self.current_analysis.get("clean_video_url") or url
-        elif parsed.get("is_mix") and parsed.get("clean_video_url"):
-            # Auto-guard against dynamic radio mixes when user didn't explicitly inspect & switch to playlist
-            target_download_url = parsed["clean_video_url"]
+        elif platform == "MukaPlay":
+            resolved_url, _ = resolve_mukaplay_url(target_download_url)
+            if resolved_url:
+                target_download_url = resolved_url
+        else:
+            parsed = parse_url_structure(url)
+            if parsed.get("is_mix") and parsed.get("clean_video_url"):
+                # Auto-guard against dynamic radio mixes when user didn't explicitly inspect & switch to playlist
+                target_download_url = parsed["clean_video_url"]
 
         # Extract info
         ydl_opts = {

@@ -638,14 +638,17 @@ class HomeScreen(Screen):
     def _debounced_url_check(self, text):
         t = text.strip()
         if t.startswith(('http://', 'https://')):
-            parsed = engine.parse_url_structure(t)
             plat = engine.detect_platform(t)
-            if parsed.get("is_mix"):
-                self.badge_platform.text = f"{plat.upper()} MIX (DEFAULT: SINGLE VIDEO)"
-            elif parsed.get("has_both"):
-                self.badge_platform.text = f"{plat.upper()} (VIDEO + PLAYLIST DETECTED)"
+            if plat == "MukaPlay":
+                self.badge_platform.text = "MUKAPLAY LINK DETECTED"
             else:
-                self.badge_platform.text = f"{plat.upper()} LINK DETECTED"
+                parsed = engine.parse_url_structure(t)
+                if parsed.get("is_mix"):
+                    self.badge_platform.text = f"{plat.upper()} MIX (DEFAULT: SINGLE VIDEO)"
+                elif parsed.get("has_both"):
+                    self.badge_platform.text = f"{plat.upper()} (VIDEO + PLAYLIST DETECTED)"
+                else:
+                    self.badge_platform.text = f"{plat.upper()} LINK DETECTED"
 
     def action_clean_url(self, *args):
         url = self.input_url.text.strip()
@@ -813,12 +816,20 @@ class HomeScreen(Screen):
             dest_target = engine.ensure_valid_download_dir(cfg.get("download_dir"))
             staging_dir = engine.get_staging_download_dir()
 
-            # Smart target URL resolution: Single video vs Playlist
-            parsed = engine.parse_url_structure(url)
+            # Smart target URL resolution: Single video vs Playlist vs External platforms (MukaPlay)
             target_download_url = url
-            if self.active_analysis and isinstance(self.active_analysis, dict) and self.active_analysis.get("has_both"):
-                if self.active_analysis.get("active_scope") == "single":
-                    target_download_url = self.active_analysis.get("clean_video_url") or url
+            muka_title = None
+            if engine.detect_platform(target_download_url) == "MukaPlay":
+                resolved_url, muka_title = engine.resolve_mukaplay_url(target_download_url)
+                if resolved_url:
+                    target_download_url = resolved_url
+
+            parsed = engine.parse_url_structure(target_download_url)
+            if self.active_analysis and isinstance(self.active_analysis, dict):
+                if self.active_analysis.get("target_url"):
+                    target_download_url = self.active_analysis.get("target_url")
+                elif self.active_analysis.get("has_both") and self.active_analysis.get("active_scope") == "single":
+                    target_download_url = self.active_analysis.get("clean_video_url") or target_download_url
             elif parsed.get("is_mix") and parsed.get("clean_video_url"):
                 target_download_url = parsed["clean_video_url"]
 
@@ -833,11 +844,11 @@ class HomeScreen(Screen):
                 filename_base = "Media_Download"
                 full_path = ""
                 try:
-                    platform = engine.detect_platform(target_download_url)
+                    platform = (self.active_analysis.get('platform') if (self.active_analysis and isinstance(self.active_analysis, dict)) else None) or engine.detect_platform(url)
                     is_video = self.selected_format.startswith("video_")
                     bitrate = "320" if self.selected_format == "mp3_320" else ("192" if self.selected_format == "mp3_192" else "128")
 
-                    title = self.active_analysis.get('title') if (self.active_analysis and isinstance(self.active_analysis, dict)) else f"{platform} Clip"
+                    title = (self.active_analysis.get('title') if (self.active_analysis and isinstance(self.active_analysis, dict)) else None) or muka_title or f"{platform} Clip"
                     cleaned = engine.clean_filename(title, 1)
                     ext_target = "mp4" if is_video else ("m4a" if self.selected_format == "m4a" else "mp3")
 
