@@ -1,4 +1,4 @@
-# 📱 Universal Downloader for Android (v2.0.0)
+# 📱 Universal Downloader for Android (v2.1.0)
 High-performance, luxury-styled mobile media downloader for Android devices built with **Python**, **Kivy**, and **yt-dlp**.
 
 ---

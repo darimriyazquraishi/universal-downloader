@@ -31,10 +31,10 @@ icon.filename = %(source.dir)s/assets/icon.png
 presplash.filename = %(source.dir)s/assets/icon.png
 
 # (str) Application versioning
-version = 2.0.0
+version = 2.1.0
 
 # (int) Numeric version code
-android.numeric_version = 20000
+android.numeric_version = 20100
 
 # (list) Application requirements
 requirements = python3,openssl,kivy,yt-dlp,requests,certifi,mutagen,urllib3,charset-normalizer

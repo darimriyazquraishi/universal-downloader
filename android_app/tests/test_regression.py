@@ -381,8 +381,8 @@ class TestBuildozerAndWorkflowPaths(unittest.TestCase):
         # Architecture & IDs
         self.assertEqual(app.get("package.name"), "universaldownloader")
         self.assertEqual(app.get("package.domain"), "com.universalmedia")
-        self.assertEqual(app.get("version"), "2.0.0")
-        self.assertEqual(app.get("android.numeric_version"), "20000")
+        self.assertEqual(app.get("version"), "2.1.0")
+        self.assertEqual(app.get("android.numeric_version"), "20100")
         self.assertEqual(app.get("source.dir"), ".")
 
         # Target API compliance: dynamically verify target API requirement >= 36 (Android 16)

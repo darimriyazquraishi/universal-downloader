@@ -557,7 +557,7 @@ class UniversalDownloaderApp(ctk.CTk):
 
         # Right side: Minimal version mark
         lbl_ver = ctk.CTkLabel(
-            top_bar, text="v2.0.0",
+            top_bar, text="v2.1.0",
             font=ctk.CTkFont(family=FONT_FAMILY, size=10),
             text_color=self.tokens["text_muted"]
         )
