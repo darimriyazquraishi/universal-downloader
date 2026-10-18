@@ -1,11 +1,14 @@
-# 📱 Universal Downloader for Android (v2.1.1)
+# 📱 Universal Downloader for Android (v2.2.0)
 High-performance, luxury-styled mobile media downloader for Android devices built with **Python**, **Kivy**, and **yt-dlp**.
 
 ---
 
 ## 🌟 Key Highlights
 - **Target Android API 36 (Android 16)**: Built with modern SDK 36 and NDK 28c toolchain supporting genuine 16 KB ELF segment alignment conforming to Google Play submission requirements.
-- **Universal Platform Support**: YouTube, Instagram Reels/Posts, TikTok, X (Twitter), Facebook, Reddit, Pinterest, SoundCloud, and Vimeo.
+- **Universal Platform Support**: YouTube, Instagram Reels/Posts, TikTok, X (Twitter), Facebook, Reddit, Pinterest, SoundCloud, Vimeo, and MukaPlay.
+- **Pause & Terminate Actions**: Inline vector control buttons next to download action allowing immediate download pausing/resuming and clean cancellation with staging cleanup.
+- **Universal File Explorer Chooser**: Download Manager folder button launches a system chooser offering inbuilt OEM file managers (Samsung My Files, Xiaomi, OnePlus, Oppo, Vivo, Huawei) and third-party managers (ZArchiver, ES File Explorer, Cx File Explorer, etc.).
+- **Reliable Media Playback**: Instant file launch integration passing MIME types and URI permissions directly to Android media players (VLC, MX Player, Google Photos, etc.).
 - **Strict TLS Security**: Complete TLS certificate validation using Mozilla CA bundles (via `certifi`). Insecure certificate bypasses are strictly disabled.
 - **Scoped Storage & MediaStore**: Compliant Scoped Storage utilizing Android MediaStore and Storage Access Framework (SAF) without broad storage permissions (`MANAGE_EXTERNAL_STORAGE`).
 - **High-Refresh Display Fluidity**: Unlocked frame loop rendering (`maxfps: 0`) delivering butter-smooth 90Hz / 120Hz / 144Hz animation on modern AMOLED displays.

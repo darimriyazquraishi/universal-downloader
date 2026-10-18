@@ -13,7 +13,7 @@ package.domain = com.universalmedia
 source.dir = .
 
 # (list) Source files to include (let empty to include all the files)
-source.include_exts = py,png,jpg,ttf,json,xml
+source.include_exts = py,png,jpg,ttf,json,xml,svg
 
 # (list) List of inclusions using pattern matching
 source.include_patterns = assets/*,assets/fonts/*
@@ -31,10 +31,10 @@ icon.filename = %(source.dir)s/assets/icon.png
 presplash.filename = %(source.dir)s/assets/icon.png
 
 # (str) Application versioning
-version = 2.1.1
+version = 2.2.0
 
 # (int) Numeric version code
-android.numeric_version = 20101
+android.numeric_version = 20200
 
 # (list) Application requirements
 requirements = python3,openssl,kivy,yt-dlp,requests,certifi,mutagen,urllib3,charset-normalizer
@@ -75,6 +75,9 @@ android.private_storage = True
 # (list) Android application meta-data to set (key=value format)
 # Share intent filter for capturing shared links from social apps
 android.manifest.intent_filters = assets/intent_filter.xml
+
+# (str) Extra XML to inject into AndroidManifest.xml (package queries for file managers & media players)
+android.extra_manifest_xml = %(source.dir)s/assets/extra_manifest.xml
 
 # (bool) Copy library instead of making a libpymodules.so
 android.copy_libs = 1

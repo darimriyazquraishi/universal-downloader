@@ -151,6 +151,10 @@ class VectorIcon(Widget):
         self.is_active = active
         self.redraw()
 
+    def set_icon_type(self, icon_type):
+        self.icon_type = icon_type
+        self.redraw()
+
     def redraw(self, *args):
         self.canvas.clear()
         cx = self.x + self.width / 2.0
@@ -177,6 +181,14 @@ class VectorIcon(Widget):
                 Line(points=[cx, cy - dp(5), cx, cy - dp(9)], width=dp(1.6))
                 Line(points=[cx - dp(5), cy, cx - dp(9), cy], width=dp(1.6))
                 Line(points=[cx + dp(5), cy, cx + dp(9), cy], width=dp(1.6))
+            elif self.icon_type == "pause":
+                Line(points=[cx - dp(3.5), cy - dp(6.5), cx - dp(3.5), cy + dp(6.5)], width=dp(2.4), cap="round")
+                Line(points=[cx + dp(3.5), cy - dp(6.5), cx + dp(3.5), cy + dp(6.5)], width=dp(2.4), cap="round")
+            elif self.icon_type in ("resume", "play"):
+                Line(points=[cx - dp(4), cy - dp(6.5), cx + dp(5.5), cy, cx - dp(4), cy + dp(6.5), cx - dp(4), cy - dp(6.5)], width=dp(2.0), close=True, joint="round")
+            elif self.icon_type in ("terminate", "cross"):
+                Line(points=[cx - dp(5.5), cy - dp(5.5), cx + dp(5.5), cy + dp(5.5)], width=dp(2.2), cap="round")
+                Line(points=[cx - dp(5.5), cy + dp(5.5), cx + dp(5.5), cy - dp(5.5)], width=dp(2.2), cap="round")
 
 
 # Reusable Styled Components
@@ -217,18 +229,16 @@ class GoldButton(ButtonBehavior, BoxLayout):
         self.padding = [dp(8), dp(4)]
 
         self.normal_bg = [0.12, 0.12, 0.15, 1.0] if is_outline else COLOR_GOLD
-        self.pressed_bg = [0.83, 0.69, 0.22, 0.25] if is_outline else COLOR_GOLD_LIGHT
+        self.pressed_bg = [0.22, 0.20, 0.16, 1.0] if is_outline else COLOR_GOLD_LIGHT
         self.border_col = COLOR_GOLD if is_outline else [0, 0, 0, 0]
 
         with self.canvas.before:
-            self.canvas_border = Color(*self.border_col)
-            self.rect_border = RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(10)])
             self.canvas_bg = Color(*self.normal_bg)
-            pad = dp(1.2) if is_outline else 0
-            self.rect_bg = RoundedRectangle(
-                pos=(self.pos[0] + pad, self.pos[1] + pad),
-                size=(max(0, self.size[0] - pad * 2), max(0, self.size[1] - pad * 2)),
-                radius=[dp(10)]
+            self.rect_bg = RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(10)])
+            self.canvas_border = Color(*self.border_col)
+            self.line_border = Line(
+                rounded_rectangle=(self.pos[0], self.pos[1], max(1, self.size[0]), max(1, self.size[1]), dp(10)),
+                width=dp(1.2) if is_outline else 0.001
             )
         self.bind(pos=self._update_canvas, size=self._update_canvas)
 
@@ -245,22 +255,38 @@ class GoldButton(ButtonBehavior, BoxLayout):
         self.add_widget(self.lbl)
 
     def _update_canvas(self, *args):
-        pad = dp(1.2) if self.is_outline else 0
-        self.rect_border.pos = self.pos
-        self.rect_border.size = self.size
-        self.rect_bg.pos = (self.pos[0] + pad, self.pos[1] + pad)
-        self.rect_bg.size = (max(0, self.size[0] - pad * 2), max(0, self.size[1] - pad * 2))
+        self.rect_bg.pos = self.pos
+        self.rect_bg.size = self.size
+        w = max(1, self.size[0])
+        h = max(1, self.size[1])
+        self.line_border.rounded_rectangle = (self.pos[0], self.pos[1], w, h, dp(10))
+        self.line_border.width = dp(1.2) if self.is_outline else 0.001
 
     def on_press(self):
         self.canvas_bg.rgba = self.pressed_bg
+        Clock.unschedule(self._auto_reset)
+        Clock.schedule_once(self._auto_reset, 0.5)
+
+    def _auto_reset(self, *args):
+        self.reset_state()
 
     def on_release(self):
+        self.reset_state()
+
+    def on_touch_up(self, touch):
+        res = super().on_touch_up(touch)
+        self.reset_state()
+        return res
+
+    def reset_state(self):
+        Clock.unschedule(self._auto_reset)
         Animation.stop_all(self.canvas_bg)
-        Animation(rgba=self.normal_bg, duration=0.15, t='out_quad').start(self.canvas_bg)
+        self.canvas_bg.rgba = self.normal_bg
 
     def set_outline(self, is_outline):
         self.is_outline = is_outline
         self.normal_bg = [0.12, 0.12, 0.15, 1.0] if is_outline else COLOR_GOLD
+        self.pressed_bg = [0.22, 0.20, 0.16, 1.0] if is_outline else COLOR_GOLD_LIGHT
         self.border_col = COLOR_GOLD if is_outline else [0, 0, 0, 0]
         self.canvas_border.rgba = self.border_col
         self.canvas_bg.rgba = self.normal_bg
@@ -270,6 +296,73 @@ class GoldButton(ButtonBehavior, BoxLayout):
     def set_text(self, text):
         self.text = text
         self.lbl.text = text
+
+
+class IconButton(ButtonBehavior, BoxLayout):
+    """
+    Square luxury button with embedded vector icon.
+    Matches the dark & gold theme of the app perfectly.
+    """
+    def __init__(self, icon_type="pause", is_outline=True, height_dp=52, width_dp=52, tooltip="", **kwargs):
+        kwargs['size_hint'] = (None, None)
+        kwargs['size'] = (dp(width_dp), dp(height_dp))
+        super().__init__(**kwargs)
+        self.icon_type = icon_type
+        self.is_outline = is_outline
+        self.orientation = "horizontal"
+        self.padding = dp(4)
+
+        self.normal_bg = [0.12, 0.12, 0.15, 1.0] if is_outline else COLOR_GOLD
+        self.pressed_bg = [0.22, 0.20, 0.16, 1.0] if is_outline else COLOR_GOLD_LIGHT
+        self.border_col = COLOR_GOLD if is_outline else [0, 0, 0, 0]
+
+        with self.canvas.before:
+            self.canvas_bg = Color(*self.normal_bg)
+            self.rect_bg = RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(10)])
+            self.canvas_border = Color(*self.border_col)
+            self.line_border = Line(
+                rounded_rectangle=(self.pos[0], self.pos[1], max(1, self.size[0]), max(1, self.size[1]), dp(10)),
+                width=dp(1.2) if is_outline else 0.001
+            )
+        self.bind(pos=self._update_canvas, size=self._update_canvas)
+
+        self.anchor = AnchorLayout(anchor_x="center", anchor_y="center")
+        self.v_icon = VectorIcon(icon_type=self.icon_type, is_active=True, size_px=22)
+        self.anchor.add_widget(self.v_icon)
+        self.add_widget(self.anchor)
+
+    def _update_canvas(self, *args):
+        self.rect_bg.pos = self.pos
+        self.rect_bg.size = self.size
+        w = max(1, self.size[0])
+        h = max(1, self.size[1])
+        self.line_border.rounded_rectangle = (self.pos[0], self.pos[1], w, h, dp(10))
+        self.line_border.width = dp(1.2) if self.is_outline else 0.001
+
+    def set_icon(self, icon_type):
+        self.icon_type = icon_type
+        self.v_icon.set_icon_type(icon_type)
+
+    def on_press(self):
+        self.canvas_bg.rgba = self.pressed_bg
+        Clock.unschedule(self._auto_reset)
+        Clock.schedule_once(self._auto_reset, 0.5)
+
+    def _auto_reset(self, *args):
+        self.reset_state()
+
+    def on_release(self):
+        self.reset_state()
+
+    def on_touch_up(self, touch):
+        res = super().on_touch_up(touch)
+        self.reset_state()
+        return res
+
+    def reset_state(self):
+        Clock.unschedule(self._auto_reset)
+        Animation.stop_all(self.canvas_bg)
+        self.canvas_bg.rgba = self.normal_bg
 
 
 class NavButton(ButtonBehavior, BoxLayout):
@@ -336,6 +429,9 @@ class HomeScreen(Screen):
         self.selected_format = "video_best"
         self.is_downloading = False
         self.stop_event = threading.Event()
+        self.pause_event = threading.Event()
+        self.pause_event.set()
+        self.is_paused = False
 
         root = BoxLayout(orientation="vertical", padding=[dp(16), dp(44), dp(16), dp(78)], spacing=dp(12))
 
@@ -594,11 +690,23 @@ class HomeScreen(Screen):
         self.card_progress.add_widget(row_hud)
         content.add_widget(self.card_progress)
 
-        # Primary Download Action Button
+        # Action Row: Smaller START DOWNLOAD + Pause + Terminate
+        self.row_download_actions = BoxLayout(orientation="horizontal", spacing=dp(8), size_hint_y=None, height=dp(52))
+
         self.btn_download = GoldButton(text="START DOWNLOAD", is_outline=False, height_dp=52, tooltip="Start downloading the inspected media to your device storage.")
-        self.btn_download.lbl.font_size = "14.5sp"
+        self.btn_download.lbl.font_size = "13.5sp"
         self.btn_download.bind(on_release=self.action_start_download)
-        content.add_widget(self.btn_download)
+
+        self.btn_pause = IconButton(icon_type="pause", is_outline=True, height_dp=52, width_dp=52, tooltip="Pause or resume active download.")
+        self.btn_pause.bind(on_release=self.action_toggle_pause)
+
+        self.btn_terminate = IconButton(icon_type="terminate", is_outline=True, height_dp=52, width_dp=52, tooltip="Cancel and terminate active download.")
+        self.btn_terminate.bind(on_release=self.action_terminate_download)
+
+        self.row_download_actions.add_widget(self.btn_download)
+        self.row_download_actions.add_widget(self.btn_pause)
+        self.row_download_actions.add_widget(self.btn_terminate)
+        content.add_widget(self.row_download_actions)
 
         scroll.add_widget(content)
         root.add_widget(scroll)
@@ -802,6 +910,29 @@ class HomeScreen(Screen):
             pass
 
 
+    def action_toggle_pause(self, *args):
+        if not getattr(self, 'is_downloading', False):
+            return
+        if not self.is_paused:
+            self.is_paused = True
+            self.pause_event.clear()
+            self.btn_pause.set_icon("resume")
+            self.lbl_progress_status.text = "Download paused"
+            self.lbl_speed.text = "PAUSED"
+        else:
+            self.is_paused = False
+            self.pause_event.set()
+            self.btn_pause.set_icon("pause")
+            self.lbl_progress_status.text = "Resuming download..."
+            self.lbl_speed.text = "RESUMING"
+
+    def action_terminate_download(self, *args):
+        if not getattr(self, 'is_downloading', False):
+            return
+        self.lbl_progress_status.text = "Cancelling download..."
+        self.stop_event.set()
+        self.pause_event.set()
+
     def action_start_download(self, *args):
         try:
             if getattr(self, 'is_downloading', False):
@@ -834,7 +965,10 @@ class HomeScreen(Screen):
                 target_download_url = parsed["clean_video_url"]
 
             self.is_downloading = True
+            self.is_paused = False
             self.stop_event.clear()
+            self.pause_event.set()
+            self.btn_pause.set_icon("pause")
             self.btn_download.set_text("DOWNLOADING...")
             self.bar_progress.value = 0
             self.lbl_pct.text = "0%"
@@ -882,6 +1016,10 @@ class HomeScreen(Screen):
                     def progress_hook(d):
                         if self.stop_event.is_set():
                             raise Exception("Stopped by user")
+                        while not self.pause_event.is_set():
+                            if self.stop_event.is_set():
+                                raise Exception("Stopped by user")
+                            time.sleep(0.20)
                         try:
                             if d.get('status') == 'downloading':
                                 total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
@@ -997,11 +1135,26 @@ class HomeScreen(Screen):
 
                     Clock.schedule_once(lambda dt, n=filename_base, p=final_dest: self.on_download_complete(n, p), 0)
                 except Exception as e:
-                    Clock.schedule_once(lambda dt, n=filename_base, err=str(e): self.on_download_failed(n, err), 0)
+                    err_msg = str(e)
+                    if self.stop_event.is_set() or "Stopped by user" in err_msg:
+                        try:
+                            for f in os.listdir(staging_dir):
+                                if f.startswith(filename_base) or f.endswith(".part") or f.endswith(".ytdl"):
+                                    fp = os.path.join(staging_dir, f)
+                                    if os.path.isfile(fp):
+                                        os.remove(fp)
+                        except Exception:
+                            pass
+                        Clock.schedule_once(lambda dt, n=filename_base: self.on_download_cancelled(n), 0)
+                    else:
+                        Clock.schedule_once(lambda dt, n=filename_base, err=err_msg: self.on_download_failed(n, err), 0)
 
             threading.Thread(target=worker, daemon=True).start()
         except Exception as e:
             self.is_downloading = False
+            self.is_paused = False
+            self.pause_event.set()
+            self.btn_pause.set_icon("pause")
             self.btn_download.set_text("START DOWNLOAD")
             self.lbl_progress_status.text = f"Init error: {str(e)[:45]}"
 
@@ -1019,6 +1172,9 @@ class HomeScreen(Screen):
     def on_download_complete(self, name, full_path):
         try:
             self.is_downloading = False
+            self.is_paused = False
+            self.pause_event.set()
+            self.btn_pause.set_icon("pause")
             self.btn_download.set_text("START DOWNLOAD")
             self.bar_progress.value = 100
             self.lbl_pct.text = "100%"
@@ -1046,9 +1202,31 @@ class HomeScreen(Screen):
         except Exception:
             pass
 
+    def on_download_cancelled(self, name):
+        try:
+            self.is_downloading = False
+            self.is_paused = False
+            self.pause_event.set()
+            self.btn_pause.set_icon("pause")
+            self.btn_download.set_text("START DOWNLOAD")
+            self.bar_progress.value = 0
+            self.lbl_pct.text = "0%"
+            self.lbl_progress_status.text = "Download cancelled"
+            self.lbl_speed.text = "SPEED: --"
+            self.lbl_eta.text = "ETA: --"
+            try:
+                self.app_ref.manager_screen.mark_failed(name)
+            except Exception:
+                pass
+        except Exception:
+            pass
+
     def on_download_failed(self, name, err):
         try:
             self.is_downloading = False
+            self.is_paused = False
+            self.pause_event.set()
+            self.btn_pause.set_icon("pause")
             self.btn_download.set_text("START DOWNLOAD")
             clean_err = str(err)
             if "CERTIFICATE_VERIFY_FAILED" in clean_err or "CertificateVerifyError" in clean_err:
@@ -1070,6 +1248,38 @@ class HomeScreen(Screen):
                 pass
         except Exception:
             pass
+# Known Inbuilt OEM & Third-Party File Explorer Packages
+FILE_EXPLORER_PACKAGES = [
+    # Inbuilt OEM File Explorers
+    "com.sec.android.app.myfiles",          # Samsung My Files
+    "com.mi.android.globalFileexplorer",   # Xiaomi / POCO File Manager Global
+    "com.android.fileexplorer",             # Xiaomi / MIUI File Manager
+    "com.coloros.filemanager",              # OPPO / Realme File Manager
+    "com.oneplus.filemanager",              # OnePlus File Manager
+    "com.vivo.filemanager",                 # Vivo / iQOO File Manager
+    "com.huawei.hidisk",                    # Huawei Files
+    "com.lenovo.filebrowser",               # Lenovo File Manager
+    "com.asus.filemanager",                 # Asus File Manager
+    "com.transsion.filemanager",            # Tecno / Infinix / Itel File Manager
+    # Popular Third-Party File Explorers
+    "ru.zdevs.zarchiver",                   # ZArchiver
+    "ru.zdevs.zarchiver.pro",               # ZArchiver Pro
+    "com.estrongs.android.pop",             # ES File Explorer
+    "com.cxinventor.file.explorer",         # Cx File Explorer
+    "pl.solidexplorer2",                    # Solid Explorer
+    "com.mixplorer",                        # MiXplorer
+    "com.mixplorer.silver",                 # MiXplorer Silver
+    "com.ghisler.android.TotalCommander",   # Total Commander
+    "com.alphainventor.filemanager",        # File Manager+
+    "me.zhanghai.android.files",            # Material Files
+    "com.lonelycatgames.Xplore",            # X-plore File Manager
+    "com.amaze.filemanager",                # Amaze File Manager
+    # System / Google
+    "com.google.android.apps.nbu.files",    # Google Files
+    "com.android.documentsui",              # AOSP Files / DocumentsUI
+]
+
+
 # ==========================================================
 # SCREEN 2: DOWNLOAD MANAGER
 # ==========================================================
@@ -1193,14 +1403,14 @@ class ManagerScreen(Screen):
 
             row_actions = BoxLayout(orientation="horizontal", spacing=dp(8), size_hint_y=None, height=dp(34))
             btn_open = GoldButton(text="OPEN FILE", is_outline=True, height_dp=34, size_hint_x=0.5, tooltip="Opens this media file in your default player.")
-            btn_open.bind(on_release=lambda x: self.open_file(self.items_data.get(name, {}).get("path", path)))
+            btn_open.bind(on_release=lambda x, n=name: self.open_item_file(n))
             btn_folder = GoldButton(text="FOLDER", is_outline=True, height_dp=34, size_hint_x=0.5, tooltip="Opens the folder containing this file in file manager.")
-            btn_folder.bind(on_release=lambda x: self.open_folder(self.items_data.get(name, {}).get("path", path)))
+            btn_folder.bind(on_release=lambda x, n=name: self.open_item_folder(n))
             row_actions.add_widget(btn_open)
             row_actions.add_widget(btn_folder)
             card.add_widget(row_actions)
 
-            self.items_data[name] = {"card": card, "status_lbl": lbl_status, "path": path}
+            self.items_data[name] = {"card": card, "status_lbl": lbl_status, "path": path, "format": fmt}
             if animate:
                 card.opacity = 0
                 self.list_layout.add_widget(card)
@@ -1228,6 +1438,17 @@ class ManagerScreen(Screen):
         except Exception:
             pass
 
+    def open_item_file(self, name):
+        item = self.items_data.get(name, {})
+        path = item.get("path", "")
+        fmt = item.get("format", "")
+        self.open_file(path, fmt=fmt, name=name)
+
+    def open_item_folder(self, name):
+        item = self.items_data.get(name, {})
+        path = item.get("path", "")
+        self.open_folder(path)
+
     def _launch_view_intent(self, target_uri, mime="*/*"):
         try:
             if not IS_ANDROID:
@@ -1235,6 +1456,8 @@ class ManagerScreen(Screen):
             PythonActivity = autoclass('org.kivy.android.PythonActivity')
             currentActivity = PythonActivity.mActivity
             Intent = autoclass('android.content.Intent')
+            ClipData = autoclass('android.content.ClipData')
+            String = autoclass('java.lang.String')
 
             try:
                 resolved_mime = currentActivity.getContentResolver().getType(target_uri)
@@ -1247,14 +1470,38 @@ class ManagerScreen(Screen):
             intent.setDataAndType(target_uri, mime)
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            try:
+                clip = ClipData.newRawUri(String("media"), target_uri)
+                intent.setClipData(clip)
+            except Exception:
+                pass
 
-            chooser = Intent.createChooser(intent, "Play media with...")
-            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            currentActivity.startActivity(chooser)
+            # Try direct launch first if a default player is configured
+            try:
+                currentActivity.startActivity(intent)
+                return
+            except Exception:
+                pass
+
+            # Fallback to chooser with CharSequence title
+            try:
+                title = String("Open media with...")
+                chooser = Intent.createChooser(intent, title)
+                chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                chooser.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                try:
+                    chooser.setClipData(intent.getClipData())
+                except Exception:
+                    pass
+                currentActivity.startActivity(chooser)
+            except Exception:
+                chooser = Intent.createChooser(intent, None)
+                chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                currentActivity.startActivity(chooser)
         except Exception as e:
             Logger.error(f"UniversalDownloader: Failed to start view intent for '{target_uri}': {e}")
 
-    def open_file(self, path):
+    def open_file(self, path, fmt="", name=""):
         try:
             if not path:
                 return
@@ -1268,9 +1515,27 @@ class ManagerScreen(Screen):
                     currentActivity = PythonActivity.mActivity
                     Uri = autoclass('android.net.Uri')
 
-                    is_video = str(path).lower().endswith(('.mp4', '.mkv', '.webm', '.avi', '.mov')) or "video" in str(path).lower()
-                    is_audio = str(path).lower().endswith(('.mp3', '.m4a', '.wav', '.opus', '.aac', '.flac')) or "audio" in str(path).lower()
-                    mime = "video/*" if is_video else ("audio/*" if is_audio else "*/*")
+                    p_str = str(path).lower()
+                    n_str = str(name).lower()
+                    f_str = str(fmt).lower()
+
+                    is_video = (
+                        any(p_str.endswith(ext) or n_str.endswith(ext) for ext in ('.mp4', '.mkv', '.webm', '.avi', '.mov', '.3gp'))
+                        or f_str in ("mp4", "video_best", "video_1080", "video_720", "video_480", "video")
+                        or "video" in f_str
+                        or any(tag in n_str for tag in ("[best]", "[1080p]", "[720p]", "[480p]"))
+                    )
+                    is_audio = (
+                        any(p_str.endswith(ext) or n_str.endswith(ext) for ext in ('.mp3', '.m4a', '.wav', '.opus', '.aac', '.flac', '.ogg'))
+                        or f_str in ("mp3", "m4a", "mp3_320", "mp3_192", "mp3_128", "audio")
+                        or "audio" in f_str
+                        or any(tag in n_str for tag in ("[320k]", "[192k]", "[128k]", "[m4a]"))
+                    )
+
+                    if not is_video and not is_audio:
+                        is_video = True
+
+                    mime = "video/*" if is_video else "audio/*"
 
                     # Case 1: Already an Android content URI (MediaStore item or SAF document URI)
                     if is_content:
@@ -1279,8 +1544,6 @@ class ManagerScreen(Screen):
                         return
 
                     # Case 2: Filesystem path - resolve content URI via MediaStore
-                    # Avoid relying exclusively on querying the deprecated _data column.
-                    # Query by DISPLAY_NAME across MediaStore collections first.
                     resolver = currentActivity.getContentResolver()
                     ContentUris = autoclass('android.content.ContentUris')
 
@@ -1357,8 +1620,6 @@ class ManagerScreen(Screen):
                         return
 
                     # Case 3: Filesystem path not yet indexed in MediaStore
-                    # Trigger MediaScannerConnection with an OnScanCompletedListener callback
-                    # so the resulting content URI is immediately opened upon scan completion.
                     try:
                         MediaScannerConnection = autoclass('android.media.MediaScannerConnection')
 
@@ -1397,6 +1658,123 @@ class ManagerScreen(Screen):
                     subprocess.run(["xdg-open", path])
         except Exception:
             pass
+
+    def _launch_folder_chooser(self, currentActivity, target_tree_uri=None):
+        Intent = autoclass('android.content.Intent')
+        Uri = autoclass('android.net.Uri')
+        String = autoclass('java.lang.String')
+        Array = autoclass('java.lang.reflect.Array')
+        DownloadManager = autoclass('android.app.DownloadManager')
+        pm = currentActivity.getPackageManager()
+
+        if target_tree_uri:
+            try:
+                DocumentsContract = autoclass('android.provider.DocumentsContract')
+                tree_uri = Uri.parse(str(target_tree_uri))
+                doc_id = DocumentsContract.getTreeDocumentId(tree_uri)
+                folder_uri = DocumentsContract.buildDocumentUriUsingTree(tree_uri, doc_id)
+            except Exception:
+                folder_uri = Uri.parse(str(target_tree_uri))
+        else:
+            folder_uri = Uri.parse("content://com.android.externalstorage.documents/document/primary%3ADownload")
+
+        base_intent = Intent(Intent.ACTION_VIEW)
+        base_intent.setDataAndType(folder_uri, "vnd.android.document/directory")
+        base_intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION)
+
+        extra_intents = []
+        added_pkgs = set()
+
+        # 1. DownloadManager ACTION_VIEW_DOWNLOADS (Google Files & AOSP DocumentsUI)
+        try:
+            dm_intent = Intent(DownloadManager.ACTION_VIEW_DOWNLOADS)
+            dm_intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            extra_intents.append(dm_intent)
+        except Exception:
+            pass
+
+        # 2. Inbuilt OEM & Third-Party File Explorers
+        for pkg in FILE_EXPLORER_PACKAGES:
+            try:
+                try:
+                    pm.getPackageInfo(pkg, 0)
+                    installed = True
+                except Exception:
+                    installed = False
+                if not installed:
+                    continue
+
+                pkg_intent = None
+                try:
+                    it = Intent(Intent.ACTION_VIEW)
+                    it.setPackage(pkg)
+                    it.setDataAndType(folder_uri, "vnd.android.document/directory")
+                    it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    if it.resolveActivity(pm) is not None:
+                        pkg_intent = it
+                except Exception:
+                    pass
+
+                if pkg_intent is None:
+                    try:
+                        pkg_intent = pm.getLaunchIntentForPackage(pkg)
+                        if pkg_intent is not None:
+                            pkg_intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    except Exception:
+                        pass
+
+                if pkg_intent is not None and pkg not in added_pkgs:
+                    extra_intents.append(pkg_intent)
+                    added_pkgs.add(pkg)
+            except Exception:
+                pass
+
+        # 3. Query system for any other directory/folder handlers
+        for m_type in ("vnd.android.document/directory", "resource/folder"):
+            try:
+                q_intent = Intent(Intent.ACTION_VIEW)
+                q_intent.setType(m_type)
+                matches = pm.queryIntentActivities(q_intent, 0)
+                if matches:
+                    for i in range(matches.size()):
+                        ri = matches.get(i)
+                        if ri and ri.activityInfo:
+                            p_name = str(ri.activityInfo.packageName)
+                            if p_name and p_name not in added_pkgs and p_name != currentActivity.getPackageName():
+                                app_it = Intent(Intent.ACTION_VIEW)
+                                app_it.setPackage(p_name)
+                                app_it.setDataAndType(folder_uri, m_type)
+                                app_it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                extra_intents.append(app_it)
+                                added_pkgs.add(p_name)
+            except Exception:
+                pass
+
+        # Create system chooser with "Open folder with..." title
+        try:
+            title = String("Open folder with...")
+            chooser = Intent.createChooser(base_intent, title)
+            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            if extra_intents:
+                try:
+                    intents_array = Array.newInstance(Intent, len(extra_intents))
+                    for idx, it in enumerate(extra_intents):
+                        Array.set(intents_array, idx, it)
+                    chooser.putExtra(Intent.EXTRA_INITIAL_INTENTS, intents_array)
+                except Exception as arr_err:
+                    Logger.warning(f"UniversalDownloader: EXTRA_INITIAL_INTENTS array error: {arr_err}")
+            currentActivity.startActivity(chooser)
+            return True
+        except Exception as e:
+            Logger.warning(f"UniversalDownloader: Chooser launch failed: {e}")
+            try:
+                dm_intent = Intent(DownloadManager.ACTION_VIEW_DOWNLOADS)
+                dm_intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                currentActivity.startActivity(dm_intent)
+                return True
+            except Exception as e2:
+                Logger.error(f"UniversalDownloader: Both chooser and DownloadManager failed: {e2}")
+                return False
 
     def open_folder(self, path):
         try:
@@ -1445,8 +1823,6 @@ class ManagerScreen(Screen):
                 try:
                     PythonActivity = autoclass('org.kivy.android.PythonActivity')
                     currentActivity = PythonActivity.mActivity
-                    Intent = autoclass('android.content.Intent')
-                    Uri = autoclass('android.net.Uri')
 
                     # Case 1: SAF Tree URI (user-selected custom folder or parent of SAF download)
                     if is_custom_tree and target_tree_uri:
@@ -1462,57 +1838,15 @@ class ManagerScreen(Screen):
                                         break
                             if persisted_perms is not None and not has_perm:
                                 Logger.error(f"UniversalDownloader: Cannot open custom folder. Storage Access Framework permission has been revoked for '{target_tree_uri}'.")
-                                # Do NOT fall back to Downloads! Report clear error to prevent false implication.
                                 return False
                         except Exception as e:
                             Logger.debug(f"UniversalDownloader: Permission check skipped or failed: {e}")
 
-                        # Attempt to launch file manager / Documents app viewing the custom tree folder
-                        opened = False
-                        try:
-                            DocumentsContract = autoclass('android.provider.DocumentsContract')
-                            tree_uri = Uri.parse(str(target_tree_uri))
-                            doc_id = DocumentsContract.getTreeDocumentId(tree_uri)
-                            folder_doc_uri = DocumentsContract.buildDocumentUriUsingTree(tree_uri, doc_id)
-
-                            intent = Intent(Intent.ACTION_VIEW)
-                            intent.setDataAndType(folder_doc_uri, "vnd.android.document/directory")
-                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                            intent.addFlags(Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)
-                            currentActivity.startActivity(intent)
-                            opened = True
-                        except Exception as e1:
-                            Logger.warning(f"UniversalDownloader: Primary ACTION_VIEW directory intent failed: {e1}")
-                            # Fallback attempt 1: Intent with EXTRA_INITIAL_URI
-                            try:
-                                DocumentsContract = autoclass('android.provider.DocumentsContract')
-                                tree_uri = Uri.parse(str(target_tree_uri))
-                                intent = Intent(Intent.ACTION_VIEW)
-                                intent.setData(tree_uri)
-                                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                currentActivity.startActivity(intent)
-                                opened = True
-                            except Exception as e2:
-                                Logger.warning(f"UniversalDownloader: Fallback tree view intent failed: {e2}")
-
-                        if not opened:
-                            Logger.error(f"UniversalDownloader: Failed to open custom SAF folder '{target_tree_uri}'. No compatible file manager found.")
-                            # CRITICAL: Preserve requested destination; DO NOT SILENTLY OPEN DOWNLOADS!
-                            return False
-                        return True
+                        return self._launch_folder_chooser(currentActivity, target_tree_uri=target_tree_uri)
 
                     # Case 2: MediaStore or standard public downloads folder
                     if is_downloads:
-                        try:
-                            DownloadManager = autoclass('android.app.DownloadManager')
-                            intent = Intent(DownloadManager.ACTION_VIEW_DOWNLOADS)
-                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            currentActivity.startActivity(intent)
-                            return True
-                        except Exception as e:
-                            Logger.error(f"UniversalDownloader: Failed to open system Downloads view: {e}")
-                            return False
+                        return self._launch_folder_chooser(currentActivity)
 
                     # Case 3: Other local filesystem directory
                     if path and os.path.isdir(path):

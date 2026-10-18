@@ -381,8 +381,8 @@ class TestBuildozerAndWorkflowPaths(unittest.TestCase):
         # Architecture & IDs
         self.assertEqual(app.get("package.name"), "universaldownloader")
         self.assertEqual(app.get("package.domain"), "com.universalmedia")
-        self.assertEqual(app.get("version"), "2.1.1")
-        self.assertEqual(app.get("android.numeric_version"), "20101")
+        self.assertEqual(app.get("version"), "2.2.0")
+        self.assertEqual(app.get("android.numeric_version"), "20200")
         self.assertEqual(app.get("source.dir"), ".")
 
         # Target API compliance: dynamically verify target API requirement >= 36 (Android 16)
@@ -1211,6 +1211,94 @@ class TestArea8FolderAndFileOpeningAnd16KbAlignment(unittest.TestCase):
         self.assertIn("tests_failed=", content)
         self.assertIn("tests_skipped=", content)
 
+
+
+class TestV220ActionButtonsAndExplorerChooser(unittest.TestCase):
+    """Verify v2.2.0 action buttons (pause/terminate), file explorer packages, and manifest queries."""
+
+    def test_file_explorer_packages_declared(self):
+        import main
+        packages = getattr(main, "FILE_EXPLORER_PACKAGES", [])
+        self.assertGreater(len(packages), 10, "FILE_EXPLORER_PACKAGES should list major OEM and third-party explorers")
+        expected_packages = [
+            "com.sec.android.app.myfiles",          # Samsung My Files
+            "com.mi.android.globalFileexplorer",   # Xiaomi File Manager
+            "com.oneplus.filemanager",              # OnePlus File Manager
+            "com.coloros.filemanager",              # Oppo File Manager
+            "ru.zdevs.zarchiver",                   # ZArchiver
+            "com.estrongs.android.pop",             # ES File Explorer
+            "com.cxinventor.file.explorer",         # Cx File Explorer
+            "com.google.android.apps.nbu.files",    # Google Files
+            "com.android.documentsui",              # AOSP Files
+        ]
+        for pkg in expected_packages:
+            self.assertIn(pkg, packages, f"Package {pkg} missing from FILE_EXPLORER_PACKAGES")
+
+    def test_extra_manifest_queries(self):
+        manifest_xml_path = os.path.join(REPO_ROOT, "assets", "extra_manifest.xml")
+        self.assertTrue(os.path.exists(manifest_xml_path), "assets/extra_manifest.xml must exist")
+        with open(manifest_xml_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        self.assertIn("<queries>", content)
+        self.assertIn("vnd.android.document/directory", content)
+        self.assertIn("resource/folder", content)
+        self.assertIn("ru.zdevs.zarchiver", content)
+        self.assertIn("com.estrongs.android.pop", content)
+        self.assertIn("com.sec.android.app.myfiles", content)
+
+    def test_buildozer_extra_manifest_configured(self):
+        spec_path = os.path.join(REPO_ROOT, "buildozer.spec")
+        with open(spec_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        self.assertIn("android.extra_manifest_xml", content)
+        self.assertIn("assets/extra_manifest.xml", content)
+        self.assertIn("version = 2.2.0", content)
+        self.assertIn("android.numeric_version = 20200", content)
+
+    def test_home_screen_pause_and_terminate_buttons(self):
+        import main
+        import threading
+        home = main.HomeScreen.__new__(main.HomeScreen)
+        home.app_ref = MagicMock()
+        home.is_downloading = False
+        home.is_paused = False
+        home.stop_event = threading.Event()
+        home.pause_event = threading.Event()
+        home.pause_event.set()
+        home.btn_pause = MagicMock()
+        home.lbl_progress_status = MagicMock()
+        home.lbl_speed = MagicMock()
+
+        self.assertTrue(home.pause_event.is_set())
+        self.assertFalse(home.is_paused)
+
+        # Simulate active download and test pause toggle
+        home.is_downloading = True
+        home.action_toggle_pause()
+        self.assertTrue(home.is_paused)
+        self.assertFalse(home.pause_event.is_set())
+        home.btn_pause.set_icon.assert_called_with("resume")
+
+        # Resume
+        home.action_toggle_pause()
+        self.assertFalse(home.is_paused)
+        self.assertTrue(home.pause_event.is_set())
+        home.btn_pause.set_icon.assert_called_with("pause")
+
+        # Terminate
+        home.action_terminate_download()
+        self.assertTrue(home.stop_event.is_set())
+        self.assertTrue(home.pause_event.is_set())
+
+    def test_manager_screen_callbacks_and_helpers(self):
+        import main
+        mgr = main.ManagerScreen.__new__(main.ManagerScreen)
+        mgr.app_ref = MagicMock()
+        mgr.items_data = {}
+        self.assertTrue(hasattr(mgr, "open_item_file"))
+        self.assertTrue(hasattr(mgr, "open_item_folder"))
+        self.assertTrue(hasattr(mgr, "_launch_folder_chooser"))
+        self.assertTrue(hasattr(mgr, "_launch_view_intent"))
 
 
 class TestLiveNetworkIntegration(unittest.TestCase):
