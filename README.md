@@ -1,102 +1,118 @@
-# 📱 Universal Downloader for Android (v2.2.0)
-High-performance, luxury-styled mobile media downloader for Android devices built with **Python**, **Kivy**, and **yt-dlp**.
+# 🌐 Universal Downloader (v2.2.0)
+High-performance, luxury-styled universal media downloader for **Windows Desktop** and **Android** devices, powered by **Python**, **CustomTkinter**, **Kivy**, and **yt-dlp**.
+
+[![Version](https://img.shields.io/badge/Release-v2.2.0-gold.svg)](https://github.com/darimriyazquraishi/universal-downloader/releases/tag/v2.2.0)
+[![Windows](https://img.shields.io/badge/Platform-Windows%20x64%20(EXE)-blue.svg?logo=windows)](https://github.com/darimriyazquraishi/universal-downloader/releases/download/v2.2.0/Universal_Downloader.exe)
+[![Android](https://img.shields.io/badge/Platform-Android%20(APK)-green.svg?logo=android)](https://github.com/darimriyazquraishi/universal-downloader/releases/download/v2.2.0/UniversalDownloader-v2.2.0.apk)
+[![License](https://img.shields.io/badge/License-MIT-brightgreen.svg)](LICENSE)
 
 ---
 
-## 🌟 Key Highlights
-- **Target Android API 36 (Android 16)**: Built with modern SDK 36 and NDK 28c toolchain supporting genuine 16 KB ELF segment alignment conforming to Google Play submission requirements.
-- **Universal Platform Support**: YouTube, Instagram Reels/Posts, TikTok, X (Twitter), Facebook, Reddit, Pinterest, SoundCloud, Vimeo, and MukaPlay.
-- **Pause & Terminate Actions**: Inline vector control buttons next to download action allowing immediate download pausing/resuming and clean cancellation with staging cleanup.
-- **Universal File Explorer Chooser**: Download Manager folder button launches a system chooser offering inbuilt OEM file managers (Samsung My Files, Xiaomi, OnePlus, Oppo, Vivo, Huawei) and third-party managers (ZArchiver, ES File Explorer, Cx File Explorer, etc.).
-- **Reliable Media Playback**: Instant file launch integration passing MIME types and URI permissions directly to Android media players (VLC, MX Player, Google Photos, etc.).
-- **Strict TLS Security**: Complete TLS certificate validation using Mozilla CA bundles (via `certifi`). Insecure certificate bypasses are strictly disabled.
-- **Scoped Storage & MediaStore**: Compliant Scoped Storage utilizing Android MediaStore and Storage Access Framework (SAF) without broad storage permissions (`MANAGE_EXTERNAL_STORAGE`).
-- **High-Refresh Display Fluidity**: Unlocked frame loop rendering (`maxfps: 0`) delivering butter-smooth 90Hz / 120Hz / 144Hz animation on modern AMOLED displays.
-- **Hardware-Accelerated 2D Rendering**: Nested rounded-rectangle vertex caching eliminating CPU bezier re-tessellation during fast scrolling.
-- **Least-Privilege Permissions**: Clean Scoped Storage architecture declaring only `INTERNET` and `ACCESS_NETWORK_STATE` permissions. Zero invasive media library permissions (`READ_MEDIA_VIDEO`, `READ_MEDIA_AUDIO`).
-- **App-Only Download Manager**: Tracks and manages only downloaded media with one-tap system player and file explorer integration.
-- **Social Share Intent**: Select "Share" from YouTube, Instagram, or TikTok and pick Universal Downloader to inspect and download immediately.
-- **Production Release Packaging**: Configured for clean `buildozer android release` builds with rigorous cryptographic signature verification.
+## 📥 Direct Downloads (v2.2.0)
+
+| Platform | File | Type | Details | Download Link |
+| :--- | :--- | :--- | :--- | :--- |
+| **💻 Windows Desktop** | `Universal_Downloader.exe` | Standalone Portable EXE | Bundled with FFmpeg + CustomTkinter | [**Download for Windows**](https://github.com/darimriyazquraishi/universal-downloader/releases/download/v2.2.0/Universal_Downloader.exe) |
+| **📱 Android** | `UniversalDownloader-v2.2.0.apk` | Release APK | 16 KB Page-Aligned · TargetSdk 36 (Android 16/15) | [**Download for Android**](https://github.com/darimriyazquraishi/universal-downloader/releases/download/v2.2.0/UniversalDownloader-v2.2.0.apk) |
 
 ---
 
-## 📂 Project Structure
+## 🌟 Key Highlights & Features
+
+### 1. Dual-Platform Native Design
+- **Windows Desktop (`gui_app.py`)**: Native x64 desktop application with custom CustomTkinter dark obsidian & gold aesthetic, multi-threaded telemetry HUD, and zero external dependency requirements (FFmpeg is bundled inside the onefile EXE).
+- **Android App (`main.py`)**: 120 FPS high-refresh AMOLED fluid mobile app with hardware-accelerated 2D rendering, touch gestures, and social media share menu hook.
+
+### 2. ⏸️ Pause & ✕ Terminate Download Controls
+- **Pause & Resume**: Clean, thread-safe pause mechanism allowing on-the-fly pausing and resuming of downloads across network chunks and post-processing.
+- **Terminate & Clean Up**: Instant cancellation button that halts threads, unblocks locks, and automatically sweeps partial staging files (`*.part`, `*.ytdl`).
+- **Vector Icons**: Custom anti-aliased luxury gold action icons (`#D4AF37`) matching the app theme without emoji fallbacks.
+
+### 3. 📂 Integrated Download Manager
+- **`OPEN FILE`**: Directly launches the completed audio or video file in your preferred default system player (VLC, Windows Media Player, MX Player, etc.).
+- **`FOLDER`**:
+  - **Windows**: Opens Windows File Explorer highlighting and selecting the exact downloaded media file (`explorer /select`).
+  - **Android**: Multi-app chooser enabling quick exploration with OEM file managers (Samsung My Files, Xiaomi, OnePlus, Oppo, Vivo) and third-party managers (ZArchiver, ES File Explorer, Cx File Explorer, Google Files).
+
+### 4. 🌐 1000+ Sites & MukaPlay Support
+- **Full Compatibility**: YouTube (Videos, Playlists, Channels, Audio), MukaPlay share links, Instagram (Reels, Posts, Stories), TikTok (watermark-free), X / Twitter, Facebook, Reddit, Pinterest, SoundCloud, Vimeo, and 1000+ sources.
+- **Smart Mix & Radio Protection**: Intelligently detects and separates YouTube radio mixes to prevent endless queue traps unless explicitly requested.
+
+### 5. 🎧 Audio & Video Formats
+- **Video Profiles**: MP4 Best Quality, 1080p Full HD, 720p HD, 480p SD.
+- **Audio Profiles**: MP3 320 kbps (Maximum Quality), MP3 192 kbps (High Quality), MP3 128 kbps (Standard CBR, ID3v2.3 tags for car/USB stereos), and AAC M4A (Original audio stream).
+
+### 6. 🔒 Strict Security & Scoped Storage
+- Strict TLS certificate verification backed by standard Mozilla CA bundles (`certifi`). Insecure SSL bypasses are completely disabled.
+- Full compliance with Android Scoped Storage & MediaStore (no invasive storage permissions required).
+
+---
+
+## 📂 Repository Architecture
+
 ```text
-UniversalDownloader_Android/
-├── assets/
-│   ├── fonts/
-│   │   └── Sebino-Soft-Regular.ttf      # Custom font
-│   ├── icon.png                         # App logo icon
-│   ├── icon_gold.png                    # Brand vector logo
-│   └── intent_filter.xml                # Android social media share menu hook
+universal-downloader/
 ├── .github/
 │   └── workflows/
-│       └── build_apk.yml                # CI/CD automated cloud APK builder
+│       ├── build_apk.yml            # Automated Android APK CI/CD pipeline
+│       └── build_exe.yml            # Automated Windows EXE CI/CD pipeline
+├── assets/
+│   ├── app_icon.ico                 # Windows application icon
+│   ├── icon_gold.png                # Luxury vector gold brand mark
+│   ├── intent_filter.xml            # Android social share-menu hook
+│   └── fonts/                       # Embedded typography
 ├── tests/
-│   └── test_regression.py               # Automated unit & integration regression tests
-├── main.py                              # Mobile UI, gesture engine, 120 FPS render loop
-├── downloader_engine.py                 # Media extraction, format logic & Scoped Storage
-├── buildozer.spec                       # Buildozer release build specification
-├── requirements.txt                     # Python dependencies
-├── run_mobile_simulator.bat             # One-click Windows mobile viewport launcher
-├── .gitignore                           # Excludes build outputs, keys, and cache
-└── README.md                            # Documentation and build setup
+│   ├── test_regression.py           # Comprehensive unit & regression test suite
+│   └── test_elf_alignment.py        # 16 KB ELF segment alignment verifier
+├── gui_app.py                       # Windows Desktop Client (CustomTkinter)
+├── main.py                          # Android Mobile App (Kivy)
+├── downloader_engine.py             # Core download & extraction engine
+├── build_exe.py                     # Windows PyInstaller compilation script
+├── buildozer.spec                   # Android packaging specification
+├── requirements.txt                 # Android simulator requirements
+├── requirements-desktop.txt         # Windows desktop requirements
+└── README.md                        # Documentation
 ```
 
 ---
 
-## 💻 Running the Desktop Simulator
-You can run and test the complete mobile interface on Windows, macOS, or Linux:
+## 🚀 Running Locally from Source
 
-1. **Install Python 3.10 or 3.11**.
-2. **Install dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. **Launch the simulator**:
-   ```bash
-   python main.py
-   # Or on Windows, double-click run_mobile_simulator.bat
-   ```
-
----
-
-## 🧪 Running Automated Tests
-Run the test suite to verify security, URL parsing, TLS rejection, and format operations:
+### Windows Desktop App
 ```bash
-python -m unittest tests/test_regression.py
+git clone https://github.com/darimriyazquraishi/universal-downloader.git
+cd universal-downloader
+
+python -m venv .venv
+.venv\Scripts\activate
+
+pip install -r requirements-desktop.txt
+python gui_app.py
+```
+
+### Android Mobile Simulator
+```bash
+pip install -r requirements.txt
+python main.py
 ```
 
 ---
 
-## 🔨 Building the Android APK
+## 🛠️ Building Binaries
 
-### Option A: Cloud Build with GitHub Actions (Recommended)
-1. Push this project to your GitHub repository.
-2. In your repository on GitHub, navigate to **Settings > Secrets and variables > Actions**.
-3. Configure mandatory release signing secrets for production releases:
-   - `RELEASE_KEYSTORE_BASE64`: Base64-encoded string of your `.keystore` file (`base64 -w 0 my-release-key.keystore`).
-   - `RELEASE_KEYSTORE_PASSWD`: Keystore password.
-   - `RELEASE_KEYALIAS`: Key alias.
-   - `RELEASE_KEYALIAS_PASSWD`: Key alias password.
-   - `RELEASE_CERT_SHA256`: Independent trusted SHA-256 certificate fingerprint (64 hex characters) matching the actual signing identity.
-   *(All 5 secrets are mandatory for production releases. If omitted, the workflow builds a secure debug APK).*
-4. Run the **Build Android APK** workflow in GitHub Actions.
+### Build Windows Onefile Executable
+```bash
+python build_exe.py
+# Produces dist/Universal_Downloader.exe (110.9 MB with bundled FFmpeg)
+```
 
-### Option B: Local Build with Buildozer (Linux / WSL2 / macOS)
-1. Generate your private release keystore (keep this file private and never commit it):
-   ```bash
-   keytool -genkeypair -v -keystore release.keystore -alias mykey -keyalg RSA -keysize 2048 -validity 10000 -storetype PKCS12
-   ```
-2. Export your signing environment variables:
-   ```bash
-   export P4A_RELEASE_KEYSTORE=release.keystore
-   export P4A_RELEASE_KEYSTORE_PASSWD="YourPassword"
-   export P4A_RELEASE_KEYALIAS="mykey"
-   export P4A_RELEASE_KEYALIAS_PASSWD="YourPassword"
-   ```
-3. Build the signed release APK:
-   ```bash
-   buildozer -v android release
-   ```
-4. The generated APK will be placed in the `./bin/` folder.
+### Build Android Production APK
+```bash
+buildozer android release
+# Or trigger via GitHub Actions under the "Build Android APK" workflow
+```
+
+---
+
+## 📜 License
+This project is licensed under the [MIT License](LICENSE).
