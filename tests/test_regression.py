@@ -1301,6 +1301,79 @@ class TestV220ActionButtonsAndExplorerChooser(unittest.TestCase):
         self.assertTrue(hasattr(mgr, "_launch_view_intent"))
 
 
+class TestDesktopV220Parity(unittest.TestCase):
+    """Verify Desktop Windows client v2.2.0 features (pause/terminate, manager open actions, version)."""
+
+    def test_desktop_gui_version_string(self):
+        gui_path = os.path.join(REPO_ROOT, "gui_app.py")
+        self.assertTrue(os.path.exists(gui_path))
+        with open(gui_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        self.assertIn('text="v2.2.0"', content)
+        self.assertIn('MUKA', content)
+
+    def test_desktop_app_methods_and_pause_logic(self):
+        import gui_app
+        import threading
+        from unittest.mock import MagicMock
+
+        # Test on dummy/mocked instance without launching full Tk mainloop
+        app = gui_app.UniversalDownloaderApp.__new__(gui_app.UniversalDownloaderApp)
+        app.is_downloading = False
+        app.is_paused = False
+        app.icon_pause = None
+        app.icon_resume = None
+        app.icon_terminate = None
+        app.stop_event = threading.Event()
+        app.pause_event = threading.Event()
+        app.pause_event.set()
+        app.btn_pause = MagicMock()
+        app.btn_terminate = MagicMock()
+        app.btn_download = MagicMock()
+        app.lbl_progress_status = MagicMock()
+        app.lbl_hud_speed = MagicMock()
+        app.lbl_hud_eta = MagicMock()
+        app.append_log = MagicMock()
+        app.manager_items = {}
+
+        self.assertTrue(hasattr(app, "toggle_pause"))
+        self.assertTrue(hasattr(app, "terminate_download"))
+        self.assertTrue(hasattr(app, "open_manager_file"))
+        self.assertTrue(hasattr(app, "open_manager_folder"))
+        self.assertTrue(hasattr(app, "init_action_icons"))
+
+        # Inactive toggle should no-op
+        app.toggle_pause()
+        self.assertFalse(app.is_paused)
+        self.assertTrue(app.pause_event.is_set())
+
+        # Active download: Pause toggle
+        app.is_downloading = True
+        app.toggle_pause()
+        self.assertTrue(app.is_paused)
+        self.assertFalse(app.pause_event.is_set())
+        app.lbl_hud_speed.configure.assert_called_with(text="SPEED: PAUSED")
+
+        # Active download: Resume toggle
+        app.toggle_pause()
+        self.assertFalse(app.is_paused)
+        self.assertTrue(app.pause_event.is_set())
+        app.lbl_hud_speed.configure.assert_called_with(text="SPEED: RESUMING")
+
+        # Terminate download
+        app.terminate_download()
+        self.assertTrue(app.stop_event.is_set())
+        self.assertTrue(app.pause_event.is_set())
+
+        # Test vector icon creation
+        app.init_action_icons()
+        self.assertIsNotNone(app.icon_pause)
+        self.assertIsNotNone(app.icon_resume)
+        self.assertIsNotNone(app.icon_terminate)
+
+
+
+
 class TestLiveNetworkIntegration(unittest.TestCase):
     """Optional live network integration tests. Enable with RUN_NETWORK_TESTS=1."""
 

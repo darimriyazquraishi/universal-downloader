@@ -5,10 +5,11 @@ import subprocess
 
 def build():
     # Kill any existing instance so files are not locked
-    try:
-        subprocess.run(["taskkill", "/f", "/im", "YouTube_Downloader.exe"], capture_output=True)
-    except Exception:
-        pass
+    for exe_name in ["Universal_Downloader.exe", "UniversalDownloader.exe", "YouTube_Downloader.exe"]:
+        try:
+            subprocess.run(["taskkill", "/f", "/im", exe_name], capture_output=True)
+        except Exception:
+            pass
 
     app_dir = os.path.dirname(os.path.abspath(__file__))
     dist_dir = os.path.join(app_dir, "dist")
@@ -26,7 +27,7 @@ def build():
         sys.executable, "-m", "PyInstaller",
         "--onefile",
         "--noconsole",
-        "--name=YouTube_Downloader",
+        "--name=Universal_Downloader",
         f"--icon={ico_file}",
         "--add-binary=ffmpeg.exe;.",
         "--add-data=assets;assets",
@@ -47,22 +48,33 @@ def build():
         print("[ERROR] PyInstaller failed.")
         sys.exit(proc.returncode)
 
-    built_exe = os.path.join(dist_dir, "YouTube_Downloader.exe")
+    built_exe = os.path.join(dist_dir, "Universal_Downloader.exe")
 
     if os.path.exists(built_exe):
-        workspace_exe = os.path.join(os.path.dirname(app_dir), "YouTube_Downloader.exe")
+        workspace_dir = os.path.dirname(app_dir)
+        workspace_exe = os.path.join(workspace_dir, "Universal_Downloader.exe")
+        workspace_exe_alt = os.path.join(workspace_dir, "UniversalDownloader.exe")
+        workspace_exe_compat = os.path.join(workspace_dir, "YouTube_Downloader.exe")
         try:
-            subprocess.run(["taskkill", "/f", "/im", "YouTube_Downloader.exe"], capture_output=True)
+            for exe_name in ["Universal_Downloader.exe", "UniversalDownloader.exe", "YouTube_Downloader.exe"]:
+                subprocess.run(["taskkill", "/f", "/im", exe_name], capture_output=True)
             shutil.copy2(built_exe, workspace_exe)
-        except Exception:
-            pass
+            shutil.copy2(built_exe, workspace_exe_alt)
+            # Remove legacy YouTube_Downloader.exe if requested or replace with new binary
+            if os.path.exists(workspace_exe_compat):
+                try:
+                    os.remove(workspace_exe_compat)
+                except Exception:
+                    pass
+        except Exception as e:
+            print(f"[WARN] Copy warning: {e}")
 
         size_mb = os.path.getsize(built_exe) / (1024 * 1024)
         print("\n=======================================================")
-        print(" SUCCESS: Native Desktop Windows EXE Created!")
+        print(" SUCCESS: Universal Downloader Native Windows EXE Created!")
         print(f" Location: {built_exe}")
-        if os.path.exists(workspace_exe):
-            print(f" Root App: {workspace_exe}")
+        print(f" Primary App: {workspace_exe}")
+        print(f" Alt App: {workspace_exe_alt}")
         print(f" Size: {size_mb:.1f} MB")
         print(" Bundled: CustomTkinter GUI + yt-dlp + FFmpeg")
         print("=======================================================\n")

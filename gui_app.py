@@ -415,7 +415,7 @@ class UniversalDownloaderApp(ctk.CTk):
         # Appearance & Geometry
         ctk.set_appearance_mode("Dark")
         ctk.set_default_color_theme("blue")
-        self.title("Universal Downloader · YouTube, Instagram, TikTok, Facebook, X")
+        self.title("Universal Downloader · YouTube, Muka, Instagram, TikTok, Facebook, X & 1000+ Sites")
         self.geometry("1160x820")
         self.minsize(1020, 720)
 
@@ -431,8 +431,16 @@ class UniversalDownloaderApp(ctk.CTk):
         except Exception:
             pass
 
+        # Action Vector Icons
+        self.icon_pause = None
+        self.icon_resume = None
+        self.icon_terminate = None
+
         # State Variables
         self.stop_event = threading.Event()
+        self.pause_event = threading.Event()
+        self.pause_event.set()
+        self.is_paused = False
         self.download_thread = None
         self.analysis_thread = None
         self.log_queue = queue.Queue()
@@ -460,7 +468,8 @@ class UniversalDownloaderApp(ctk.CTk):
         }
         self.all_formats = {**self.video_formats, **self.audio_formats}
 
-        # Build UI Components
+        # Build Vector Action Icons & UI Components
+        self.init_action_icons()
         self.create_layout()
         self.load_initial_downloads()
         self.poll_log_queue()
@@ -471,6 +480,37 @@ class UniversalDownloaderApp(ctk.CTk):
 
         # Handle clean exit
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+    def init_action_icons(self):
+        """Generate pixel-perfect luxury gold vector icons for Pause, Resume, and Terminate buttons."""
+        try:
+            from PIL import Image, ImageDraw
+            gold = (212, 175, 55, 255) # App theme gold (#D4AF37)
+            size = 48
+
+            # 1. Pause: two rounded vertical gold bars
+            img_p = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+            draw_p = ImageDraw.Draw(img_p)
+            draw_p.rounded_rectangle([13, 11, 20, 37], radius=3, fill=gold)
+            draw_p.rounded_rectangle([28, 11, 35, 37], radius=3, fill=gold)
+            self.icon_pause = ctk.CTkImage(light_image=img_p, dark_image=img_p, size=(18, 18))
+
+            # 2. Resume / Play: gold triangle pointing right
+            img_r = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+            draw_r = ImageDraw.Draw(img_r)
+            draw_r.polygon([(16, 11), (37, 24), (16, 37)], fill=gold)
+            self.icon_resume = ctk.CTkImage(light_image=img_r, dark_image=img_r, size=(18, 18))
+
+            # 3. Terminate: crisp diagonal cross
+            img_t = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+            draw_t = ImageDraw.Draw(img_t)
+            draw_t.line([(14, 14), (34, 34)], fill=gold, width=5)
+            draw_t.line([(34, 14), (14, 34)], fill=gold, width=5)
+            self.icon_terminate = ctk.CTkImage(light_image=img_t, dark_image=img_t, size=(18, 18))
+        except Exception:
+            self.icon_pause = None
+            self.icon_resume = None
+            self.icon_terminate = None
 
     def create_layout(self):
         """
@@ -549,7 +589,7 @@ class UniversalDownloaderApp(ctk.CTk):
         lbl_title.pack(side="left")
 
         lbl_tag = ctk.CTkLabel(
-            brand_frame, text="· YOUTUBE, IG, TIKTOK, FB, X & 1000+ SITES",
+            brand_frame, text="· YOUTUBE, MUKA, IG, TIKTOK, FB, X & 1000+ SITES",
             font=ctk.CTkFont(family=FONT_FAMILY, size=10),
             text_color=self.tokens["text_muted"]
         )
@@ -557,7 +597,7 @@ class UniversalDownloaderApp(ctk.CTk):
 
         # Right side: Minimal version mark
         lbl_ver = ctk.CTkLabel(
-            top_bar, text="v2.1.1",
+            top_bar, text="v2.2.0",
             font=ctk.CTkFont(family=FONT_FAMILY, size=10),
             text_color=self.tokens["text_muted"]
         )
@@ -881,7 +921,7 @@ class UniversalDownloaderApp(ctk.CTk):
         self.chk_dups.pack(anchor="w", pady=(0, 14))
         CTkTooltip(self.chk_dups, "Skip downloading any files that already exist in your destination folder.")
 
-        # 4. Action Row (Gold CTA & Subtle Dark Gold Stop Button)
+        # 4. Action Row (Gold CTA & Dedicated Pause / Terminate Action Buttons)
         action_row = ctk.CTkFrame(controls_panel, fg_color="transparent")
         action_row.pack(fill="x", pady=(0, 4))
 
@@ -891,18 +931,31 @@ class UniversalDownloaderApp(ctk.CTk):
             fg_color=self.tokens["gold"], hover_color=self.tokens["gold_hover"],
             text_color=self.tokens["gold_text_dark"], command=self.start_download
         )
-        self.btn_download.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        self.btn_download.pack(side="left", fill="x", expand=True, padx=(0, 6))
         CTkTooltip(self.btn_download, "Begin downloading the selected media files.")
 
-        self.btn_stop = ctk.CTkButton(
-            action_row, text="STOP", width=90, height=44, corner_radius=5,
-            font=ctk.CTkFont(family=FONT_FAMILY, size=11, weight="bold"),
+        self.btn_pause = ctk.CTkButton(
+            action_row, text="" if self.icon_pause else "❚❚", image=self.icon_pause, width=46, height=44, corner_radius=5,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=13, weight="bold"),
             fg_color=self.tokens["gold_subtle"], hover_color=self.tokens["gold_dark"],
             border_width=1, border_color=self.tokens["gold_border"],
-            text_color=self.tokens["gold_bright"], state="disabled", command=self.stop_download
+            text_color=self.tokens["gold_bright"], state="disabled", command=self.toggle_pause
         )
-        self.btn_stop.pack(side="left")
-        CTkTooltip(self.btn_stop, "Cancel and halt the ongoing download task.")
+        self.btn_pause.pack(side="left", padx=(0, 6))
+        CTkTooltip(self.btn_pause, "Pause or resume the active download.")
+
+        self.btn_terminate = ctk.CTkButton(
+            action_row, text="" if self.icon_terminate else "✕", image=self.icon_terminate, width=46, height=44, corner_radius=5,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=13, weight="bold"),
+            fg_color=self.tokens["gold_subtle"], hover_color=self.tokens["gold_dark"],
+            border_width=1, border_color=self.tokens["gold_border"],
+            text_color=self.tokens["gold_bright"], state="disabled", command=self.terminate_download
+        )
+        self.btn_terminate.pack(side="left")
+        CTkTooltip(self.btn_terminate, "Cancel and terminate the active download.")
+
+        # Compatibility alias
+        self.btn_stop = self.btn_terminate
 
         # --- LOWER ACTIVITY & TELEMETRY SECTION ---
         term_frame = ctk.CTkFrame(
@@ -1031,6 +1084,10 @@ class UniversalDownloaderApp(ctk.CTk):
                 data["status_lbl"].configure(text_color=self.tokens["gold_bright"])
             elif "Downloading" in status_text:
                 data["status_lbl"].configure(text_color=self.tokens["gold"])
+            elif "Terminated" in status_text or "Stopped" in status_text:
+                data["status_lbl"].configure(text_color=self.tokens["gold_subtle"])
+            elif "Failed" in status_text:
+                data["status_lbl"].configure(text_color="#F87171")
             else:
                 data["status_lbl"].configure(text=self.tokens["text_muted"])
             if filepath:
@@ -1054,9 +1111,9 @@ class UniversalDownloaderApp(ctk.CTk):
         )
         lbl_t.pack(fill="x", padx=8, pady=(6, 2))
 
-        # Bottom row: Format + Status
+        # Format + Status row
         row = ctk.CTkFrame(card, fg_color="transparent")
-        row.pack(fill="x", padx=8, pady=(0, 6))
+        row.pack(fill="x", padx=8, pady=(0, 4))
 
         fmt_short = format_label.split("·")[0].strip() if "·" in format_label else (format_label[:14] if format_label else "Media")
         ctk.CTkLabel(
@@ -1073,14 +1130,42 @@ class UniversalDownloaderApp(ctk.CTk):
         )
         lbl_status.pack(side="right")
 
-        # Double click to open folder/file
-        card.bind("<Double-Button-1>", lambda _e, p=filepath: self.locate_file(p))
-        lbl_t.bind("<Double-Button-1>", lambda _e, p=filepath: self.locate_file(p))
+        # Action row: Dedicated OPEN FILE and FOLDER buttons
+        act_row = ctk.CTkFrame(card, fg_color="transparent")
+        act_row.pack(fill="x", padx=8, pady=(0, 6))
+
+        btn_open_file = ctk.CTkButton(
+            act_row, text="OPEN FILE", height=22, corner_radius=3,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=9, weight="bold"),
+            fg_color=self.tokens["surface_elevated"], hover_color=self.tokens["surface_hover"],
+            border_width=1, border_color=self.tokens["border"],
+            text_color=self.tokens["gold"],
+            command=lambda i=item_id: self.open_manager_file(i)
+        )
+        btn_open_file.pack(side="left", fill="x", expand=True, padx=(0, 4))
+        CTkTooltip(btn_open_file, "Play or open this media file with your default player.")
+
+        btn_open_folder = ctk.CTkButton(
+            act_row, text="FOLDER", height=22, corner_radius=3,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=9, weight="bold"),
+            fg_color=self.tokens["surface_elevated"], hover_color=self.tokens["surface_hover"],
+            border_width=1, border_color=self.tokens["border"],
+            text_color=self.tokens["text_secondary"],
+            command=lambda i=item_id: self.open_manager_folder(i)
+        )
+        btn_open_folder.pack(side="left", fill="x", expand=True)
+        CTkTooltip(btn_open_folder, "Open and highlight this file in Windows File Explorer.")
+
+        # Double click fallback
+        card.bind("<Double-Button-1>", lambda _e, i=item_id: self.open_manager_folder(i))
+        lbl_t.bind("<Double-Button-1>", lambda _e, i=item_id: self.open_manager_file(i))
 
         self.manager_items[item_id] = {
             "card": card,
             "status_lbl": lbl_status,
-            "path": filepath
+            "path": filepath,
+            "btn_open_file": btn_open_file,
+            "btn_open_folder": btn_open_folder
         }
 
         self.update_manager_count()
@@ -1104,11 +1189,67 @@ class UniversalDownloaderApp(ctk.CTk):
         except Exception:
             messagebox.showinfo("Notice", f"Unable to open destination folder:\n{p}")
 
+    def open_manager_file(self, item_id):
+        """Open the downloaded media file with the system default player."""
+        data = self.manager_items.get(item_id, {})
+        target = data.get("path")
+        if not target or not os.path.exists(target):
+            dest = self.entry_dest.get().strip() or get_default_download_dir()
+            for ext in ['.mp4', '.mp3', '.m4a', '.mkv', '.webm']:
+                cand = os.path.join(dest, f"{item_id}{ext}")
+                if os.path.exists(cand):
+                    target = cand
+                    data["path"] = cand
+                    break
+                cand_plain = os.path.join(dest, item_id)
+                if os.path.exists(cand_plain):
+                    target = cand_plain
+                    data["path"] = cand_plain
+                    break
+
+        if target and os.path.exists(target):
+            try:
+                os.startfile(os.path.normpath(target))
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to open media file:\n{e}")
+        else:
+            messagebox.showinfo("Notice", "The media file is still downloading or was moved from destination.")
+
+    def open_manager_folder(self, item_id):
+        """Reveal and select the file in Windows File Explorer without sticking or freezing."""
+        data = self.manager_items.get(item_id, {})
+        target = data.get("path")
+        dest = self.entry_dest.get().strip() or get_default_download_dir()
+
+        if not target or not os.path.exists(target):
+            for ext in ['.mp4', '.mp3', '.m4a', '.mkv', '.webm']:
+                cand = os.path.join(dest, f"{item_id}{ext}")
+                if os.path.exists(cand):
+                    target = cand
+                    data["path"] = cand
+                    break
+
+        if target and os.path.exists(target):
+            try:
+                import subprocess
+                subprocess.Popen(f'explorer /select,"{os.path.normpath(target)}"')
+                return
+            except Exception:
+                pass
+
+        target_dir = os.path.dirname(target) if (target and os.path.exists(os.path.dirname(target))) else dest
+        try:
+            os.makedirs(target_dir, exist_ok=True)
+            os.startfile(os.path.normpath(target_dir))
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open destination folder:\n{e}")
+
     def locate_file(self, filepath):
+        """Locate file or folder (double click handler)."""
         if filepath and os.path.exists(filepath):
             try:
-                subprocess_dir = os.path.dirname(filepath)
-                os.startfile(subprocess_dir)
+                import subprocess
+                subprocess.Popen(f'explorer /select,"{os.path.normpath(filepath)}"')
             except Exception:
                 self.open_current_destination()
         else:
@@ -1497,9 +1638,15 @@ class UniversalDownloaderApp(ctk.CTk):
             max_tracks = int(limit_txt)
 
         self.is_downloading = True
+        self.is_paused = False
         self.stop_event.clear()
+        self.pause_event.set()
         self.btn_download.configure(state="disabled")
-        self.btn_stop.configure(state="normal")
+        if self.icon_pause:
+            self.btn_pause.configure(state="normal", image=self.icon_pause, text="")
+        else:
+            self.btn_pause.configure(state="normal", text="❚❚")
+        self.btn_terminate.configure(state="normal")
         self.progress_bar.set(0)
         self.lbl_progress_status.configure(text="Initializing universal download engine...")
         self.lbl_hud_speed.configure(text="SPEED: --")
@@ -1518,11 +1665,42 @@ class UniversalDownloaderApp(ctk.CTk):
         self.download_thread = threading.Thread(target=self.run_download_worker, args=(params,), daemon=True)
         self.download_thread.start()
 
-    def stop_download(self):
+    def toggle_pause(self):
+        """Pause or resume the active download task."""
+        if not self.is_downloading:
+            return
+        if not self.is_paused:
+            self.is_paused = True
+            self.pause_event.clear()
+            if self.icon_resume:
+                self.btn_pause.configure(image=self.icon_resume, text="")
+            else:
+                self.btn_pause.configure(text="▶")
+            self.lbl_progress_status.configure(text="Download paused")
+            self.lbl_hud_speed.configure(text="SPEED: PAUSED")
+            self.lbl_hud_eta.configure(text="ETA: --")
+            self.append_log("[USER] Download paused.")
+        else:
+            self.is_paused = False
+            self.pause_event.set()
+            if self.icon_pause:
+                self.btn_pause.configure(image=self.icon_pause, text="")
+            else:
+                self.btn_pause.configure(text="❚❚")
+            self.lbl_progress_status.configure(text="Resuming download...")
+            self.lbl_hud_speed.configure(text="SPEED: RESUMING")
+            self.append_log("[USER] Download resumed.")
+
+    def terminate_download(self):
+        """Cancel and terminate the active download, cleaning up staging files."""
         if self.is_downloading:
             self.stop_event.set()
-            self.append_log("[USER] Download cancellation requested.")
-            self.lbl_progress_status.configure(text="Stopping...")
+            self.pause_event.set()
+            self.append_log("[USER] Download cancellation/termination requested.")
+            self.lbl_progress_status.configure(text="Terminating download...")
+
+    # Compatibility alias
+    stop_download = terminate_download
 
     def run_download_worker(self, params):
         url = params["url"]
@@ -1748,7 +1926,13 @@ class UniversalDownloaderApp(ctk.CTk):
         def progress_hook(d):
             if self.stop_event.is_set():
                 raise yt_dlp.utils.DownloadCancelled("Download cancelled by user.")
-            if d['status'] == 'downloading':
+            while not self.pause_event.is_set():
+                if self.stop_event.is_set():
+                    raise yt_dlp.utils.DownloadCancelled("Download cancelled by user.")
+                time.sleep(0.15)
+            if getattr(self, 'is_paused', False):
+                return
+            if d.get('status') == 'downloading':
                 total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
                 downloaded = d.get('downloaded_bytes') or 0
                 speed = d.get('speed') or 0
@@ -1761,12 +1945,27 @@ class UniversalDownloaderApp(ctk.CTk):
                     total_pct = min(99.9, base_pct + (sub_pct / total_queue))
                     self.after(0, lambda: self.update_progress_ui(total_pct, speed_str, eta_str))
 
+        def postprocessor_hook(d):
+            if self.stop_event.is_set():
+                raise yt_dlp.utils.DownloadCancelled("Download cancelled by user.")
+            while not self.pause_event.is_set():
+                if self.stop_event.is_set():
+                    raise yt_dlp.utils.DownloadCancelled("Download cancelled by user.")
+                time.sleep(0.15)
+
         start_num = max_idx + 1
         downloaded_count = 0
 
         for i, item in enumerate(queue_items):
             if self.stop_event.is_set():
                 self.append_log("[STOP] Download process interrupted by user.")
+                break
+
+            while not self.pause_event.is_set():
+                if self.stop_event.is_set():
+                    break
+                time.sleep(0.15)
+            if self.stop_event.is_set():
                 break
 
             current_idx = i + 1
@@ -1817,6 +2016,7 @@ class UniversalDownloaderApp(ctk.CTk):
                     'outtmpl': os.path.join(dest_dir, f"{filename_base}.%(ext)s"),
                     'overwrites': True,
                     'progress_hooks': [progress_hook],
+                    'postprocessor_hooks': [postprocessor_hook],
                     'http_headers': {
                         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
                     }
@@ -1841,6 +2041,7 @@ class UniversalDownloaderApp(ctk.CTk):
                     'outtmpl': os.path.join(dest_dir, f"{filename_base}.%(ext)s"),
                     'overwrites': True,
                     'progress_hooks': [progress_hook],
+                    'postprocessor_hooks': [postprocessor_hook],
                     'postprocessors': postprocessors,
                     'postprocessor_args': postprocessor_args,
                     'http_headers': {
@@ -1858,7 +2059,18 @@ class UniversalDownloaderApp(ctk.CTk):
                 self.after(0, lambda name=filename_base, p=full_target_path: self.add_manager_item(name, name, "✓ Saved", format_label, p))
             except Exception as e:
                 if self.stop_event.is_set():
-                    self.after(0, lambda name=filename_base: self.add_manager_item(name, name, "✕ Stopped", format_label))
+                    # Clean up partial download files
+                    try:
+                        for f in os.listdir(dest_dir):
+                            if f.startswith(filename_base) and (f.endswith('.part') or f.endswith('.ytdl')):
+                                try:
+                                    os.remove(os.path.join(dest_dir, f))
+                                except Exception:
+                                    pass
+                    except Exception:
+                        pass
+                    self.after(0, lambda name=filename_base: self.add_manager_item(name, name, "✕ Terminated", format_label))
+                    self.append_log(f"[STOP] Download terminated for: {item['title']}")
                     break
                 self.append_log(f"[ERR] Download error ({item['title']}): {e}")
                 self.after(0, lambda name=filename_base: self.add_manager_item(name, name, "✕ Failed", format_label))
@@ -1867,6 +2079,10 @@ class UniversalDownloaderApp(ctk.CTk):
         self.after(0, self.finish_download)
 
     def update_progress_ui(self, pct, speed, eta):
+        if getattr(self, 'is_paused', False):
+            self.lbl_hud_speed.configure(text="SPEED: PAUSED")
+            self.lbl_hud_eta.configure(text="ETA: --")
+            return
         self.progress_bar.set(pct / 100.0)
         self.lbl_progress_meta.configure(text=f"{round(pct)}%")
         if speed:
@@ -1876,11 +2092,20 @@ class UniversalDownloaderApp(ctk.CTk):
 
     def finish_download(self):
         self.is_downloading = False
+        self.is_paused = False
+        self.pause_event.set()
         self.btn_download.configure(state="normal")
-        self.btn_stop.configure(state="disabled")
-        self.lbl_progress_status.configure(text="Ready to download")
-        self.progress_bar.set(1.0)
-        self.lbl_progress_meta.configure(text="100%")
+        if self.icon_pause:
+            self.btn_pause.configure(state="disabled", image=self.icon_pause, text="")
+        else:
+            self.btn_pause.configure(state="disabled", text="❚❚")
+        self.btn_terminate.configure(state="disabled")
+        if self.stop_event.is_set():
+            self.lbl_progress_status.configure(text="Download terminated")
+        else:
+            self.lbl_progress_status.configure(text="Ready to download")
+            self.progress_bar.set(1.0)
+            self.lbl_progress_meta.configure(text="100%")
         self.lbl_hud_speed.configure(text="SPEED: --")
         self.lbl_hud_eta.configure(text="ETA: --")
 
@@ -1888,6 +2113,7 @@ class UniversalDownloaderApp(ctk.CTk):
         if self.is_downloading:
             if messagebox.askyesno("Exit", "A download is currently running. Are you sure you want to exit?"):
                 self.stop_event.set()
+                self.pause_event.set()
                 self.destroy()
         else:
             self.destroy()
