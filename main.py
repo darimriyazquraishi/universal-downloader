@@ -1282,31 +1282,44 @@ class ManagerScreen(Screen):
                     # Avoid relying exclusively on querying the deprecated _data column.
                     # Query by DISPLAY_NAME across MediaStore collections first.
                     resolver = currentActivity.getContentResolver()
-                    MediaStore = autoclass('android.provider.MediaStore')
                     ContentUris = autoclass('android.content.ContentUris')
 
                     filename = os.path.basename(path)
                     target_uri = None
                     tables = []
                     if is_video:
-                        tables.append(MediaStore.Video.Media.EXTERNAL_CONTENT_URI)
+                        try:
+                            MediaStoreVideo = autoclass('android.provider.MediaStore$Video$Media')
+                            tables.append(MediaStoreVideo.EXTERNAL_CONTENT_URI)
+                        except Exception:
+                            tables.append(Uri.parse("content://media/external/video/media"))
                     elif is_audio:
-                        tables.append(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI)
+                        try:
+                            MediaStoreAudio = autoclass('android.provider.MediaStore$Audio$Media')
+                            tables.append(MediaStoreAudio.EXTERNAL_CONTENT_URI)
+                        except Exception:
+                            tables.append(Uri.parse("content://media/external/audio/media"))
                     try:
-                        tables.append(MediaStore.Downloads.EXTERNAL_CONTENT_URI)
+                        MediaStoreDownloads = autoclass('android.provider.MediaStore$Downloads')
+                        tables.append(MediaStoreDownloads.EXTERNAL_CONTENT_URI)
                     except Exception:
-                        pass
-                    tables.append(MediaStore.Files.getContentUri("external"))
+                        tables.append(Uri.parse("content://media/external/downloads"))
+                    try:
+                        MediaStoreFiles = autoclass('android.provider.MediaStore$Files')
+                        String = autoclass('java.lang.String')
+                        tables.append(MediaStoreFiles.getContentUri(String("external")))
+                    except Exception:
+                        tables.append(Uri.parse("content://media/external/file"))
 
-                    # Query by DISPLAY_NAME
+                    # Query by DISPLAY_NAME using literal column constants
                     for table in tables:
                         try:
                             cursor = resolver.query(
                                 table,
                                 ["_id"],
-                                f"{MediaStore.MediaColumns.DISPLAY_NAME} = ?",
+                                "_display_name = ?",
                                 [filename],
-                                f"{MediaStore.MediaColumns.DATE_ADDED} DESC"
+                                "date_added DESC"
                             )
                             if cursor and cursor.moveToFirst():
                                 media_id = cursor.getLong(0)

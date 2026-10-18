@@ -381,8 +381,8 @@ class TestBuildozerAndWorkflowPaths(unittest.TestCase):
         # Architecture & IDs
         self.assertEqual(app.get("package.name"), "universaldownloader")
         self.assertEqual(app.get("package.domain"), "com.universalmedia")
-        self.assertEqual(app.get("version"), "2.1.0")
-        self.assertEqual(app.get("android.numeric_version"), "20100")
+        self.assertEqual(app.get("version"), "2.1.1")
+        self.assertEqual(app.get("android.numeric_version"), "20101")
         self.assertEqual(app.get("source.dir"), ".")
 
         # Target API compliance: dynamically verify target API requirement >= 36 (Android 16)
@@ -763,6 +763,105 @@ class TestStorageDestinationAndUriHandling(unittest.TestCase):
                     self.assertIn("Failed to save to Android MediaStore Downloads", str(ctx.exception))
                     # Staging file MUST NOT be deleted or moved!
                     self.assertTrue(os.path.exists(staging_file), "Staging file must be preserved upon MediaStore failure")
+
+    def test_mediastore_save_success_and_streaming(self):
+        """Verify save_to_mediastore_downloads correctly sets Scoped Storage values and clears IS_PENDING."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            staging_file = os.path.join(tmpdir, "video.mp4")
+            with open(staging_file, "wb") as f:
+                f.write(b"video bytes content 12345")
+
+            dest_target_file = os.path.join(tmpdir, "dest_out.mp4")
+            dest_fd = os.open(dest_target_file, os.O_CREAT | os.O_RDWR)
+            try:
+                mock_activity = MagicMock()
+                mock_resolver = MagicMock()
+                mock_activity.mActivity.getContentResolver.return_value = mock_resolver
+
+                mock_item_uri = MagicMock()
+                mock_item_uri.toString.return_value = "content://media/external/downloads/42"
+                mock_resolver.insert.return_value = mock_item_uri
+
+                mock_pfd = MagicMock()
+                mock_pfd.getFd.return_value = dest_fd
+                mock_resolver.openFileDescriptor.return_value = mock_pfd
+
+                put_dict = {}
+                class FakeContentValues:
+                    def put(self, k, v):
+                        put_dict[str(k)] = str(v)
+                    def clear(self):
+                        put_dict.clear()
+
+                def mock_autoclass(cls_name):
+                    if cls_name == "org.kivy.android.PythonActivity":
+                        return mock_activity
+                    if cls_name == "android.content.ContentValues":
+                        return FakeContentValues
+                    if cls_name == "java.lang.String":
+                        return lambda s: str(s)
+                    if cls_name == "java.lang.Integer":
+                        return lambda i: int(i)
+                    if cls_name == "java.lang.Long":
+                        return lambda l: int(l)
+                    if cls_name == "android.net.Uri":
+                        mock_uri = MagicMock()
+                        mock_uri.parse = lambda s: s
+                        return mock_uri
+                    if cls_name == "android.os.Build$VERSION":
+                        b = MagicMock()
+                        b.SDK_INT = 36
+                        return b
+                    if cls_name == "android.os.Environment":
+                        e = MagicMock()
+                        e.DIRECTORY_DOWNLOADS = "Download"
+                        return e
+                    return MagicMock()
+
+                with patch.dict(engine.__dict__, {"autoclass": mock_autoclass}):
+                    res = engine.save_to_mediastore_downloads(staging_file, "video.mp4", "video/mp4")
+                    self.assertEqual(res, "content://media/external/downloads/42")
+                    self.assertFalse(os.path.exists(staging_file), "Staging file must be cleaned up on success")
+
+                    # Verify written contents in destination file
+                    with open(dest_target_file, "rb") as out_f:
+                        self.assertEqual(out_f.read(), b"video bytes content 12345")
+
+                    # Verify resolver.update was called to clear IS_PENDING (set to 0)
+                    mock_resolver.update.assert_called_once()
+                    update_args = mock_resolver.update.call_args[0]
+                    self.assertEqual(update_args[0], mock_item_uri)
+                    self.assertEqual(put_dict.get("is_pending"), "0")
+            finally:
+                try:
+                    os.close(dest_fd)
+                except OSError:
+                    pass
+
+    def test_write_staging_to_uri_fallback_to_stream(self):
+        """Verify _write_staging_to_uri falls back to openOutputStream when pfd fails."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            staging_file = os.path.join(tmpdir, "staging.bin")
+            with open(staging_file, "wb") as f:
+                f.write(b"fallback stream data")
+
+            mock_resolver = MagicMock()
+            mock_resolver.openFileDescriptor.side_effect = Exception("PFD not supported")
+
+            written_bytes = bytearray()
+            mock_out_stream = MagicMock()
+            def mock_write(b, *args):
+                if isinstance(b, (bytes, bytearray)):
+                    written_bytes.extend(b)
+                elif hasattr(b, '__iter__'):
+                    written_bytes.extend(bytes(b))
+            mock_out_stream.write.side_effect = mock_write
+            mock_resolver.openOutputStream.return_value = mock_out_stream
+
+            engine._write_staging_to_uri(mock_resolver, "content://test/uri", staging_file)
+            self.assertEqual(bytes(written_bytes), b"fallback stream data")
+            mock_out_stream.flush.assert_called_once()
+            mock_out_stream.close.assert_called_once()
 
     def test_failed_file_write_preserves_staging(self):
         with tempfile.TemporaryDirectory() as tmpdir:

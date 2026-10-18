@@ -4,10 +4,13 @@ import re
 import json
 import time
 import shutil
+import logging
 import threading
 import unicodedata
 import urllib.parse
 import yt_dlp
+
+logger = logging.getLogger(__name__)
 
 # Configure secure Mozilla CA bundle via certifi for robust TLS certificate validation
 try:
@@ -172,6 +175,63 @@ def extract_parent_tree_uri(path_or_uri):
         return s.split("/document/")[0]
     return None
 
+def _write_staging_to_uri(resolver, target_uri, staging_filepath):
+    """
+    Safely stream data from local staging_filepath into an Android ContentResolver target_uri.
+    First attempts native ParcelFileDescriptor streaming via openFileDescriptor('w'),
+    which executes directly via OS-level kernel file descriptor (maximum performance, zero JNI overhead).
+    Falls back to Java OutputStream if ParcelFileDescriptor is unavailable.
+    """
+    pfd = None
+    try:
+        String = autoclass('java.lang.String')
+        pfd = resolver.openFileDescriptor(target_uri, String("w"))
+    except Exception as e:
+        logger.debug(f"openFileDescriptor failed for {target_uri}: {e}")
+        pfd = None
+
+    if pfd is not None:
+        try:
+            fd = pfd.getFd()
+            with open(staging_filepath, "rb") as in_f:
+                with open(fd, "wb", closefd=False) as out_f:
+                    shutil.copyfileobj(in_f, out_f, length=131072)
+                    out_f.flush()
+                    try:
+                        os.fsync(fd)
+                    except OSError:
+                        pass
+            return
+        finally:
+            try:
+                pfd.close()
+            except Exception:
+                pass
+
+    # Fallback to openOutputStream
+    out_stream = None
+    try:
+        out_stream = resolver.openOutputStream(target_uri)
+        if not out_stream:
+            raise IOError(f"Failed to open output stream for URI {target_uri}")
+        with open(staging_filepath, "rb") as in_f:
+            while True:
+                chunk = in_f.read(65536)
+                if not chunk:
+                    break
+                try:
+                    from jnius import jarray
+                    out_stream.write(jarray('B')(chunk), 0, len(chunk))
+                except Exception:
+                    out_stream.write(bytearray(chunk))
+        out_stream.flush()
+    finally:
+        if out_stream:
+            try:
+                out_stream.close()
+            except Exception:
+                pass
+
 def save_to_mediastore_downloads(staging_filepath, display_name, mime_type="video/mp4"):
     """
     Publish completed media file to Android MediaStore Downloads collection.
@@ -179,58 +239,79 @@ def save_to_mediastore_downloads(staging_filepath, display_name, mime_type="vide
     broad storage permissions (WRITE_EXTERNAL_STORAGE / MANAGE_EXTERNAL_STORAGE).
     Returns the created content:// URI or raises an Exception.
     """
+    if not os.path.exists(staging_filepath):
+        raise FileNotFoundError(f"Staged download not found at {staging_filepath}")
+
     PythonActivity = autoclass('org.kivy.android.PythonActivity')
     activity = PythonActivity.mActivity
     resolver = activity.getContentResolver()
     ContentValues = autoclass('android.content.ContentValues')
-    MediaStore = autoclass('android.provider.MediaStore')
-    Environment = autoclass('android.os.Environment')
     String = autoclass('java.lang.String')
     Integer = autoclass('java.lang.Integer')
+    Long = autoclass('java.lang.Long')
     Uri = autoclass('android.net.Uri')
 
-    values = ContentValues()
-    values.put(String(MediaStore.MediaColumns.DISPLAY_NAME), String(display_name))
-    values.put(String(MediaStore.MediaColumns.MIME_TYPE), String(mime_type))
+    # MediaStore column names as literal string constants to avoid PyJNIus inner-interface reflection failures
+    COLUMN_DISPLAY_NAME = "_display_name"
+    COLUMN_MIME_TYPE = "mime_type"
+    COLUMN_RELATIVE_PATH = "relative_path"
+    COLUMN_IS_PENDING = "is_pending"
+    COLUMN_SIZE = "_size"
 
-    # Android Scoped Storage requires trailing slash for RELATIVE_PATH
-    rel_path = "Download/"
+    sdk_int = 30
     try:
-        if hasattr(Environment, 'DIRECTORY_DOWNLOADS'):
-            d = Environment.DIRECTORY_DOWNLOADS
-            d_str = str(d.toString() if hasattr(d, 'toString') else d).strip('/')
-            rel_path = f"{d_str}/"
-    except Exception:
-        rel_path = "Download/"
-    values.put(String(MediaStore.MediaColumns.RELATIVE_PATH), String(rel_path))
-
-    # Use explicit java.lang.Integer(1) to avoid PyJNIus overload ambiguity
-    try:
-        if hasattr(MediaStore.MediaColumns, 'IS_PENDING'):
-            values.put(String(MediaStore.MediaColumns.IS_PENDING), Integer(1))
+        BuildVersion = autoclass('android.os.Build$VERSION')
+        sdk_int = int(BuildVersion.SDK_INT)
     except Exception:
         pass
 
-    # Resolve MediaStore.Downloads.EXTERNAL_CONTENT_URI (inner class MediaStore$Downloads)
-    downloads_uri = None
+    values = ContentValues()
+    values.put(String(COLUMN_DISPLAY_NAME), String(display_name))
+    values.put(String(COLUMN_MIME_TYPE), String(mime_type or "application/octet-stream"))
     try:
-        MediaStoreDownloads = autoclass('android.provider.MediaStore$Downloads')
-        downloads_uri = MediaStoreDownloads.EXTERNAL_CONTENT_URI
+        values.put(String(COLUMN_SIZE), Long(os.path.getsize(staging_filepath)))
     except Exception:
+        pass
+
+    if sdk_int >= 29:
+        # Android Scoped Storage requires trailing slash for RELATIVE_PATH
+        rel_path = "Download/"
         try:
-            downloads_uri = Uri.parse("content://media/external/downloads")
+            Environment = autoclass('android.os.Environment')
+            if hasattr(Environment, 'DIRECTORY_DOWNLOADS'):
+                d = Environment.DIRECTORY_DOWNLOADS
+                d_str = str(d.toString() if hasattr(d, 'toString') else d).strip('/')
+                rel_path = f"{d_str}/"
         except Exception:
-            pass
+            rel_path = "Download/"
+        values.put(String(COLUMN_RELATIVE_PATH), String(rel_path))
+        values.put(String(COLUMN_IS_PENDING), Integer(1))
+
+    # Resolve MediaStore.Downloads.EXTERNAL_CONTENT_URI (API 29+) or MediaStore.Files
+    downloads_uri = None
+    if sdk_int >= 29:
+        try:
+            MediaStoreDownloads = autoclass('android.provider.MediaStore$Downloads')
+            downloads_uri = MediaStoreDownloads.EXTERNAL_CONTENT_URI
+        except Exception:
+            try:
+                downloads_uri = Uri.parse("content://media/external/downloads")
+            except Exception:
+                pass
 
     if not downloads_uri:
-        downloads_uri = Uri.parse("content://media/external/downloads")
+        try:
+            MediaStoreFiles = autoclass('android.provider.MediaStore$Files')
+            downloads_uri = MediaStoreFiles.getContentUri(String("external"))
+        except Exception:
+            downloads_uri = Uri.parse("content://media/external/downloads")
 
     item_uri = resolver.insert(downloads_uri, values)
     if not item_uri:
         # Retry with unique timestamped filename if duplicate entry constraint occurred
         base, ext = os.path.splitext(display_name)
         unique_name = f"{base}_{int(time.time())}{ext}"
-        values.put(String(MediaStore.MediaColumns.DISPLAY_NAME), String(unique_name))
+        values.put(String(COLUMN_DISPLAY_NAME), String(unique_name))
         item_uri = resolver.insert(downloads_uri, values)
 
     if not item_uri:
@@ -245,48 +326,29 @@ def save_to_mediastore_downloads(staging_filepath, display_name, mime_type="vide
     if not item_uri:
         raise IOError(f"Failed to create MediaStore entry for '{display_name}' (resolver.insert returned null)")
 
-    out_stream = None
     try:
-        out_stream = resolver.openOutputStream(item_uri)
-        if not out_stream:
-            raise IOError(f"Failed to open output stream for MediaStore URI {item_uri}")
-        with open(staging_filepath, "rb") as in_f:
-            while True:
-                chunk = in_f.read(65536)
-                if not chunk:
-                    break
-                try:
-                    out_stream.write(chunk)
-                except Exception:
-                    out_stream.write(bytearray(chunk))
-        out_stream.flush()
+        _write_staging_to_uri(resolver, item_uri, staging_filepath)
 
         # Mark item as no longer pending so external player apps, download manager, and gallery see it
-        try:
-            if hasattr(MediaStore.MediaColumns, 'IS_PENDING'):
-                values.clear()
-                values.put(String(MediaStore.MediaColumns.IS_PENDING), Integer(0))
-                resolver.update(item_uri, values, None, None)
-        except Exception:
-            pass
+        if sdk_int >= 29:
+            try:
+                clear_values = ContentValues()
+                clear_values.put(String(COLUMN_IS_PENDING), Integer(0))
+                resolver.update(item_uri, clear_values, None, None)
+            except Exception as update_err:
+                logger.warning(f"Failed to clear IS_PENDING for {item_uri}: {update_err}")
 
         try:
             os.remove(staging_filepath)
         except Exception:
             pass
         return str(item_uri.toString())
-    except Exception:
+    except Exception as e:
         try:
             resolver.delete(item_uri, None, None)
         except Exception:
             pass
-        raise
-    finally:
-        if out_stream:
-            try:
-                out_stream.close()
-            except Exception:
-                pass
+        raise IOError(f"Failed to stream data to MediaStore item: {e}")
 
 def get_staging_download_dir():
     """Retrieve an always-writable staging directory for progressive downloading & muxing."""
@@ -343,26 +405,7 @@ def save_file_to_destination(staging_filepath, destination_dir_or_uri, display_n
             if not new_doc_uri:
                 raise IOError(f"DocumentsContract failed to create document for '{display_name}'")
 
-            out_stream = resolver.openOutputStream(new_doc_uri)
-            if not out_stream:
-                raise IOError(f"Failed to open output stream for '{display_name}'")
-
-            try:
-                with open(staging_filepath, "rb") as in_f:
-                    while True:
-                        chunk = in_f.read(65536)
-                        if not chunk:
-                            break
-                        try:
-                            out_stream.write(chunk)
-                        except Exception:
-                            out_stream.write(bytearray(chunk))
-                out_stream.flush()
-            finally:
-                try:
-                    out_stream.close()
-                except Exception:
-                    pass
+            _write_staging_to_uri(resolver, new_doc_uri, staging_filepath)
 
             try:
                 os.remove(staging_filepath)
