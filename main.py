@@ -1050,7 +1050,9 @@ class HomeScreen(Screen):
                 clean_err = "Media unavailable"
             elif "Private video" in clean_err:
                 clean_err = "Media is private"
-            self.lbl_progress_status.text = f"Error: {clean_err[:40]}"
+            elif "Failed to save to Android MediaStore Downloads" in clean_err:
+                clean_err = "Storage save failed"
+            self.lbl_progress_status.text = f"Error: {clean_err[:60]}"
             try:
                 self.app_ref.manager_screen.mark_failed(name)
             except Exception:
