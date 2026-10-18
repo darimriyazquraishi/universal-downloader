@@ -185,22 +185,65 @@ def save_to_mediastore_downloads(staging_filepath, display_name, mime_type="vide
     ContentValues = autoclass('android.content.ContentValues')
     MediaStore = autoclass('android.provider.MediaStore')
     Environment = autoclass('android.os.Environment')
+    String = autoclass('java.lang.String')
+    Integer = autoclass('java.lang.Integer')
+    Uri = autoclass('android.net.Uri')
 
     values = ContentValues()
-    values.put(MediaStore.MediaColumns.DISPLAY_NAME, display_name)
-    values.put(MediaStore.MediaColumns.MIME_TYPE, mime_type)
-    values.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
-    values.put(MediaStore.MediaColumns.IS_PENDING, 1)
+    values.put(String(MediaStore.MediaColumns.DISPLAY_NAME), String(display_name))
+    values.put(String(MediaStore.MediaColumns.MIME_TYPE), String(mime_type))
 
+    # Android Scoped Storage requires trailing slash for RELATIVE_PATH
+    rel_path = "Download/"
     try:
-        downloads_uri = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+        if hasattr(Environment, 'DIRECTORY_DOWNLOADS'):
+            d = Environment.DIRECTORY_DOWNLOADS
+            d_str = str(d.toString() if hasattr(d, 'toString') else d).strip('/')
+            rel_path = f"{d_str}/"
     except Exception:
-        Uri = autoclass('android.net.Uri')
+        rel_path = "Download/"
+    values.put(String(MediaStore.MediaColumns.RELATIVE_PATH), String(rel_path))
+
+    # Use explicit java.lang.Integer(1) to avoid PyJNIus overload ambiguity
+    try:
+        if hasattr(MediaStore.MediaColumns, 'IS_PENDING'):
+            values.put(String(MediaStore.MediaColumns.IS_PENDING), Integer(1))
+    except Exception:
+        pass
+
+    # Resolve MediaStore.Downloads.EXTERNAL_CONTENT_URI (inner class MediaStore$Downloads)
+    downloads_uri = None
+    try:
+        MediaStoreDownloads = autoclass('android.provider.MediaStore$Downloads')
+        downloads_uri = MediaStoreDownloads.EXTERNAL_CONTENT_URI
+    except Exception:
+        try:
+            downloads_uri = Uri.parse("content://media/external/downloads")
+        except Exception:
+            pass
+
+    if not downloads_uri:
         downloads_uri = Uri.parse("content://media/external/downloads")
 
     item_uri = resolver.insert(downloads_uri, values)
     if not item_uri:
-        raise IOError(f"Failed to create MediaStore entry for {display_name}")
+        # Retry with unique timestamped filename if duplicate entry constraint occurred
+        base, ext = os.path.splitext(display_name)
+        unique_name = f"{base}_{int(time.time())}{ext}"
+        values.put(String(MediaStore.MediaColumns.DISPLAY_NAME), String(unique_name))
+        item_uri = resolver.insert(downloads_uri, values)
+
+    if not item_uri:
+        # Fallback to MediaStore.Files collection if Downloads collection returned null
+        try:
+            MediaStoreFiles = autoclass('android.provider.MediaStore$Files')
+            files_uri = MediaStoreFiles.getContentUri(String("external"))
+            item_uri = resolver.insert(files_uri, values)
+        except Exception:
+            pass
+
+    if not item_uri:
+        raise IOError(f"Failed to create MediaStore entry for '{display_name}' (resolver.insert returned null)")
 
     out_stream = None
     try:
@@ -212,13 +255,21 @@ def save_to_mediastore_downloads(staging_filepath, display_name, mime_type="vide
                 chunk = in_f.read(65536)
                 if not chunk:
                     break
-                out_stream.write(bytes(chunk))
+                try:
+                    out_stream.write(chunk)
+                except Exception:
+                    out_stream.write(bytearray(chunk))
         out_stream.flush()
 
         # Mark item as no longer pending so external player apps, download manager, and gallery see it
-        values.clear()
-        values.put(MediaStore.MediaColumns.IS_PENDING, 0)
-        resolver.update(item_uri, values, None, None)
+        try:
+            if hasattr(MediaStore.MediaColumns, 'IS_PENDING'):
+                values.clear()
+                values.put(String(MediaStore.MediaColumns.IS_PENDING), Integer(0))
+                resolver.update(item_uri, values, None, None)
+        except Exception:
+            pass
+
         try:
             os.remove(staging_filepath)
         except Exception:
@@ -282,12 +333,13 @@ def save_file_to_destination(staging_filepath, destination_dir_or_uri, display_n
             resolver = activity.getContentResolver()
             Uri = autoclass('android.net.Uri')
             DocumentsContract = autoclass('android.provider.DocumentsContract')
+            String = autoclass('java.lang.String')
 
             tree_uri = Uri.parse(str(destination_dir_or_uri))
             doc_id = DocumentsContract.getTreeDocumentId(tree_uri)
             parent_doc_uri = DocumentsContract.buildDocumentUriUsingTree(tree_uri, doc_id)
 
-            new_doc_uri = DocumentsContract.createDocument(resolver, parent_doc_uri, mime_type, display_name)
+            new_doc_uri = DocumentsContract.createDocument(resolver, parent_doc_uri, String(mime_type), String(display_name))
             if not new_doc_uri:
                 raise IOError(f"DocumentsContract failed to create document for '{display_name}'")
 
@@ -301,7 +353,10 @@ def save_file_to_destination(staging_filepath, destination_dir_or_uri, display_n
                         chunk = in_f.read(65536)
                         if not chunk:
                             break
-                        out_stream.write(bytes(chunk))
+                        try:
+                            out_stream.write(chunk)
+                        except Exception:
+                            out_stream.write(bytearray(chunk))
                 out_stream.flush()
             finally:
                 try:
